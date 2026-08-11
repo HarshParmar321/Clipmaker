@@ -1,0 +1,129 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Clipmaker — turn long videos into clips</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=Inter:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<div class="grain"></div>
+
+<header class="topbar">
+  <div class="wrap topbar-inner">
+    <div class="brand">
+      <span class="brand-mark">◆</span>
+      <span class="brand-name">CLIPMAKER</span>
+    </div>
+    <div class="topbar-status" id="apiStatus">
+      <span class="dot"></span> checking backend…
+    </div>
+  </div>
+</header>
+
+<main>
+
+  <!-- HERO -->
+  <section class="hero wrap">
+    <p class="eyebrow">01 — paste, wait, download</p>
+    <h1 class="hero-title">Long video in.<br>Scroll-stopping clips out.</h1>
+    <p class="hero-sub">Drop a link or a file. We transcribe it, find the moments worth clipping, cut them, and burn in captions — automatically.</p>
+  </section>
+
+  <!-- SLATE / INPUT -->
+  <section class="wrap">
+    <div class="slate" id="slate">
+      <div class="slate-stripes" aria-hidden="true"></div>
+      <div class="slate-body">
+        <div class="slate-row">
+          <input type="text" id="urlInput" placeholder="Paste a YouTube link…" autocomplete="off" />
+          <span class="slate-or">or</span>
+          <label class="btn-upload">
+            <i class="upload-icon">⇧</i> Upload file
+            <input type="file" id="fileInput" accept="video/*" hidden />
+          </label>
+        </div>
+        <button class="btn-primary" id="generateBtn">
+          <span>Generate clips</span>
+        </button>
+        <p class="slate-hint" id="slateHint">Works best with videos under 15 minutes.</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- FILMSTRIP PROGRESS (signature element) -->
+  <section class="wrap" id="progressSection" hidden>
+    <div class="filmstrip-progress">
+      <div class="sprocket-row" aria-hidden="true"></div>
+      <div class="stage-frames" id="stageFrames"></div>
+      <div class="sprocket-row" aria-hidden="true"></div>
+    </div>
+    <p class="progress-label" id="progressLabel">queued…</p>
+  </section>
+
+  <div class="sprocket-divider" aria-hidden="true"></div>
+
+  <!-- RESULTS -->
+  <section class="wrap" id="resultsSection" hidden>
+    <p class="eyebrow">02 — your clips</p>
+    <h2 class="section-title">Pick your favorites</h2>
+
+    <p class="section-title-sub">Click a clip's preview to watch it, or hit Edit to trim it and toggle captions.</p>
+
+    <div class="clip-grid" id="clipGrid"></div>
+  </section>
+
+  <!-- TRIM EDITOR (opens when a clip is clicked) -->
+  <section class="wrap" id="editorSection" hidden>
+    <div class="editor-panel">
+      <div class="editor-header">
+        <p class="eyebrow" style="margin:0;">03 — edit this clip</p>
+        <button class="editor-close" id="editorClose">✕ close</button>
+      </div>
+
+      <video class="editor-preview" id="editorVideo" controls></video>
+
+      <div class="editor-timeline" id="editorTimeline">
+        <div class="editor-frames" id="editorFrames"></div>
+        <div class="trim-region" id="trimRegion">
+          <div class="trim-handle trim-handle-left" id="trimLeft"></div>
+          <div class="trim-handle trim-handle-right" id="trimRight"></div>
+        </div>
+      </div>
+      <p class="trim-readout" id="trimReadout">0:00 – 0:00</p>
+
+      <div class="editor-controls">
+        <div class="caption-toggle-row">
+          <span class="caption-style-label">captions</span>
+          <button class="toggle" id="captionToggle" data-on="true">
+            <span class="toggle-knob"></span>
+          </button>
+        </div>
+        <button class="btn-primary editor-export" id="exportBtn">Export edit</button>
+      </div>
+      <p class="slate-hint" id="editorStatus"></p>
+    </div>
+  </section>
+
+  <section class="wrap" id="errorSection" hidden>
+    <div class="error-card">
+      <p class="error-title">That didn't work.</p>
+      <p class="error-detail" id="errorDetail"></p>
+    </div>
+  </section>
+
+</main>
+
+<footer class="footer">
+  <div class="wrap footer-inner">
+    <span>Clipmaker · built by <a href="https://github.com/HarshParmar321" target="_blank" rel="noopener">Harsh</a></span>
+  </div>
+</footer>
+
+<script src="script.js"></script>
+</body>
+</html>
