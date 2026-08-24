@@ -13,8 +13,8 @@ from config import GROQ_API_KEY
 client = Groq(api_key=GROQ_API_KEY)
 
 
-def extract_audio(video_path: Path) -> Path:
-    audio_path = video_path.with_suffix(".mp3")
+def extract_audio(video_path: Path, audio_path: Path) -> Path:
+    audio_path.parent.mkdir(parents=True, exist_ok=True)
     subprocess.run(
         [
             "ffmpeg", "-y", "-i", str(video_path),
@@ -27,12 +27,12 @@ def extract_audio(video_path: Path) -> Path:
     return audio_path
 
 
-def transcribe(video_path: Path) -> list[dict]:
+def transcribe(video_path: Path, audio_path: Path) -> list[dict]:
     """
     Returns a list of word-level entries:
       [{"word": "hello", "start": 0.12, "end": 0.4}, ...]
     """
-    audio_path = extract_audio(video_path)
+    audio_path = extract_audio(video_path, audio_path)
 
     with open(audio_path, "rb") as f:
         response = client.audio.transcriptions.create(

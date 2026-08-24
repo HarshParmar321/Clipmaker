@@ -1,0 +1,187 @@
+{
+  "suite": "Clipmaker Smart Reframe quality suite",
+  "cases": [
+    {
+      "id": "01-single-speaker-landscape",
+      "title": "Single speaker, landscape source",
+      "source": "videos/01-single-speaker-landscape.mp4",
+      "start": 0,
+      "end": 20,
+      "tags": ["single-speaker", "landscape", "core"],
+      "expect_subject": true,
+      "thresholds": {
+        "min_detection_ratio": 0.8,
+        "min_average_confidence": 0.5,
+        "max_horizontal_speed_per_second": 0.3,
+        "max_subject_switches": 1
+      },
+      "human_review": {
+        "correct_subject": null,
+        "composition": null,
+        "stability": null,
+        "clip_completeness": null,
+        "caption_readability": null,
+        "overall": null,
+        "notes": ""
+      }
+    },
+    {
+      "id": "02-speaker-left-edge",
+      "title": "Speaker near left edge",
+      "source": "videos/02-speaker-left-edge.mp4",
+      "start": 0,
+      "end": 15,
+      "tags": ["single-speaker", "edge", "composition"],
+      "expect_subject": true,
+      "thresholds": {"min_detection_ratio": 0.65, "max_edge_hold_ratio": 0.35},
+      "human_review": {}
+    },
+    {
+      "id": "03-speaker-right-edge",
+      "title": "Speaker near right edge",
+      "source": "videos/03-speaker-right-edge.mp4",
+      "start": 0,
+      "end": 15,
+      "tags": ["single-speaker", "edge", "composition"],
+      "expect_subject": true,
+      "thresholds": {"min_detection_ratio": 0.65, "max_edge_hold_ratio": 0.35},
+      "human_review": {}
+    },
+    {
+      "id": "04-side-profile",
+      "title": "Side-profile speaker",
+      "source": "videos/04-side-profile.mp4",
+      "start": 0,
+      "end": 15,
+      "tags": ["single-speaker", "profile", "detection"],
+      "expect_subject": true,
+      "thresholds": {"min_detection_ratio": 0.45, "min_average_confidence": 0.3},
+      "human_review": {}
+    },
+    {
+      "id": "05-low-light",
+      "title": "Low-light speaker",
+      "source": "videos/05-low-light.mp4",
+      "start": 0,
+      "end": 15,
+      "tags": ["single-speaker", "low-light", "detection"],
+      "expect_subject": true,
+      "thresholds": {"min_detection_ratio": 0.4, "min_average_confidence": 0.25},
+      "human_review": {}
+    },
+    {
+      "id": "06-small-distant-face",
+      "title": "Small or distant face",
+      "source": "videos/06-small-distant-face.mp4",
+      "start": 0,
+      "end": 15,
+      "tags": ["single-speaker", "small-face", "detection"],
+      "expect_subject": true,
+      "thresholds": {"min_detection_ratio": 0.35, "max_zoom": 1.35},
+      "human_review": {}
+    },
+    {
+      "id": "07-fast-head-movement",
+      "title": "Fast head and body movement",
+      "source": "videos/07-fast-head-movement.mp4",
+      "start": 0,
+      "end": 15,
+      "tags": ["single-speaker", "motion", "stability"],
+      "expect_subject": true,
+      "thresholds": {
+        "min_detection_ratio": 0.55,
+        "max_horizontal_speed_per_second": 0.48,
+        "max_vertical_speed_per_second": 0.38
+      },
+      "human_review": {}
+    },
+    {
+      "id": "08-two-person-conversation",
+      "title": "Two-person conversation",
+      "source": "videos/08-two-person-conversation.mp4",
+      "start": 0,
+      "end": 25,
+      "tags": ["multi-speaker", "speaker-choice", "core"],
+      "expect_subject": true,
+      "thresholds": {"min_detection_ratio": 0.65, "max_subject_switches": 5},
+      "human_review": {}
+    },
+    {
+      "id": "09-three-person-panel",
+      "title": "Three-person panel",
+      "source": "videos/09-three-person-panel.mp4",
+      "start": 0,
+      "end": 25,
+      "tags": ["multi-speaker", "panel", "speaker-choice"],
+      "expect_subject": true,
+      "thresholds": {"min_detection_ratio": 0.55, "max_subject_switches": 7},
+      "human_review": {}
+    },
+    {
+      "id": "10-frequent-scene-cuts",
+      "title": "Frequent scene cuts",
+      "source": "videos/10-frequent-scene-cuts.mp4",
+      "start": 0,
+      "end": 20,
+      "tags": ["scene-cuts", "recovery", "stability"],
+      "expect_subject": true,
+      "thresholds": {"min_detection_ratio": 0.4, "max_subject_switches": 8},
+      "human_review": {}
+    },
+    {
+      "id": "11-broll-no-face",
+      "title": "B-roll with no visible face",
+      "source": "videos/11-broll-no-face.mp4",
+      "start": 0,
+      "end": 15,
+      "tags": ["b-roll", "no-face", "fallback"],
+      "expect_subject": false,
+      "thresholds": {"max_detection_ratio": 0.2},
+      "human_review": {}
+    },
+    {
+      "id": "12-vertical-source",
+      "title": "Already-vertical source",
+      "source": "videos/12-vertical-source.mp4",
+      "start": 0,
+      "end": 15,
+      "tags": ["vertical-source", "core"],
+      "expect_subject": true,
+      "thresholds": {"min_detection_ratio": 0.65, "max_horizontal_speed_per_second": 0.25},
+      "human_review": {}
+    },
+    {
+      "id": "13-screen-share-facecam",
+      "title": "Screen share with face camera",
+      "source": "videos/13-screen-share-facecam.mp4",
+      "start": 0,
+      "end": 20,
+      "tags": ["screen-share", "small-face", "composition"],
+      "expect_subject": true,
+      "thresholds": {"min_detection_ratio": 0.35, "max_zoom": 1.2},
+      "human_review": {}
+    },
+    {
+      "id": "14-occlusion-reentry",
+      "title": "Speaker occlusion and re-entry",
+      "source": "videos/14-occlusion-reentry.mp4",
+      "start": 0,
+      "end": 20,
+      "tags": ["occlusion", "recovery", "stability"],
+      "expect_subject": true,
+      "thresholds": {"min_detection_ratio": 0.4, "max_subject_switches": 3},
+      "human_review": {}
+    },
+    {
+      "id": "15-speech-boundary-captions",
+      "title": "Speech boundary and caption-heavy clip",
+      "source": "videos/15-speech-boundary-captions.mp4",
+      "start": 0,
+      "end": 25,
+      "tags": ["captions", "speech-boundary", "clip-quality"],
+      "expect_subject": true,
+      "thresholds": {"min_detection_ratio": 0.55, "max_edge_hold_ratio": 0.5},
+      "human_review": {}
+    }
+  ]
+}

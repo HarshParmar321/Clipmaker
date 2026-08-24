@@ -7,7 +7,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=Inter:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="style.css">
+<link rel="stylesheet" href="style.css?v=9">
 </head>
 <body>
 
@@ -47,6 +47,49 @@
             <input type="file" id="fileInput" accept="video/*" hidden />
           </label>
         </div>
+        <div class="creative-field">
+          <label for="creativePrompt">What should the AI look for? <span>optional</span></label>
+          <textarea id="creativePrompt" maxlength="1000" placeholder="Example: Find practical AI tips for startup founders, with a confident tone."></textarea>
+          <div class="prompt-chips" aria-label="Creative direction examples">
+            <button type="button" data-prompt="Find surprising insights with strong hooks.">Surprising insights</button>
+            <button type="button" data-prompt="Prioritize practical, actionable advice.">Actionable advice</button>
+            <button type="button" data-prompt="Find funny, emotional, or highly relatable moments.">Emotional moments</button>
+          </div>
+        </div>
+        <div class="generation-settings">
+          <fieldset class="setting-group" id="initialFormatChoices">
+            <legend>Output format</legend>
+            <div class="choice-row">
+              <button type="button" class="choice-btn" data-value="landscape" aria-pressed="false"><b>16:9</b><span>YouTube</span></button>
+              <button type="button" class="choice-btn active" data-value="vertical" aria-pressed="true"><b>9:16</b><span>Reels · Shorts</span></button>
+              <button type="button" class="choice-btn" data-value="original" aria-pressed="false"><b>Original</b><span>No crop</span></button>
+            </div>
+          </fieldset>
+          <fieldset class="setting-group" id="initialCaptionChoices">
+            <legend>Caption look</legend>
+            <div class="choice-row compact">
+              <button type="button" class="choice-btn active" data-value="bold" aria-pressed="true"><b>Bold</b><span>High impact</span></button>
+              <button type="button" class="choice-btn" data-value="clean" aria-pressed="false"><b>Clean</b><span>Minimal</span></button>
+              <button type="button" class="choice-btn" data-value="karaoke" aria-pressed="false"><b>Karaoke</b><span>Word color</span></button>
+            </div>
+          </fieldset>
+          <fieldset class="setting-group" id="clipCountChoices">
+            <legend>Number of clips</legend>
+            <div class="choice-row">
+              <button type="button" class="choice-btn" data-value="3" aria-pressed="false"><b>3 clips</b><span>Only the strongest</span></button>
+              <button type="button" class="choice-btn active" data-value="5" aria-pressed="true"><b>5 clips</b><span>Recommended</span></button>
+              <button type="button" class="choice-btn" data-value="8" aria-pressed="false"><b>8 clips</b><span>More options</span></button>
+            </div>
+          </fieldset>
+          <fieldset class="setting-group" id="clipLengthChoices">
+            <legend>Preferred length</legend>
+            <div class="choice-row">
+              <button type="button" class="choice-btn" data-value="quick" aria-pressed="false"><b>Quick</b><span>15–30 sec</span></button>
+              <button type="button" class="choice-btn active" data-value="balanced" aria-pressed="true"><b>Balanced</b><span>20–60 sec</span></button>
+              <button type="button" class="choice-btn" data-value="deep" aria-pressed="false"><b>Deep</b><span>45–90 sec</span></button>
+            </div>
+          </fieldset>
+        </div>
         <button class="btn-primary" id="generateBtn">
           <span>Generate clips</span>
         </button>
@@ -62,7 +105,19 @@
       <div class="stage-frames" id="stageFrames"></div>
       <div class="sprocket-row" aria-hidden="true"></div>
     </div>
-    <p class="progress-label" id="progressLabel">queued…</p>
+    <div class="progress-meter" role="progressbar" aria-label="Job progress" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" id="progressMeter">
+      <span id="progressMeterFill"></span>
+    </div>
+    <div class="progress-summary">
+      <strong id="progressPercent">0%</strong>
+      <span id="progressElapsed">Elapsed 0:00</span>
+    </div>
+    <p class="progress-label" id="progressLabel" aria-live="polite">queued…</p>
+    <p class="progress-detail" id="progressDetail"></p>
+    <div class="job-actions">
+      <button type="button" class="btn-secondary" id="cancelJobBtn" hidden>Cancel processing</button>
+      <button type="button" class="btn-secondary retry-job" id="retryJobBtn" hidden>Retry this job</button>
+    </div>
   </section>
 
   <div class="sprocket-divider" aria-hidden="true"></div>
@@ -72,7 +127,7 @@
     <p class="eyebrow">02 — your clips</p>
     <h2 class="section-title">Pick your favorites</h2>
 
-    <p class="section-title-sub">Click a clip's preview to watch it, or hit Edit to trim it and toggle captions.</p>
+    <p class="section-title-sub">Every clip is ready to download—or open the studio to reframe, trim, and rewrite captions.</p>
 
     <div class="clip-grid" id="clipGrid"></div>
   </section>
@@ -82,28 +137,194 @@
     <div class="editor-panel">
       <div class="editor-header">
         <p class="eyebrow" style="margin:0;">03 — edit this clip</p>
-        <button class="editor-close" id="editorClose">✕ close</button>
-      </div>
-
-      <video class="editor-preview" id="editorVideo" controls></video>
-
-      <div class="editor-timeline" id="editorTimeline">
-        <div class="editor-frames" id="editorFrames"></div>
-        <div class="trim-region" id="trimRegion">
-          <div class="trim-handle trim-handle-left" id="trimLeft"></div>
-          <div class="trim-handle trim-handle-right" id="trimRight"></div>
+        <div class="editor-header-actions">
+          <span class="editor-save-state" id="editorSaveState">No changes</span>
+          <button class="editor-close" id="editorClose">✕ close</button>
         </div>
       </div>
-      <p class="trim-readout" id="trimReadout">0:00 – 0:00</p>
+
+      <div class="editor-workspace">
+        <div class="preview-column">
+          <div class="preview-stage" id="editorPreviewStage" data-format="vertical">
+            <canvas class="editor-preview-canvas" id="editorPreviewCanvas" aria-label="Exact crop preview"></canvas>
+            <video class="editor-source-video" id="editorVideo" crossorigin="anonymous" playsinline preload="metadata"></video>
+            <div class="caption-preview" id="captionPreview" data-style="bold" data-position="bottom" data-size="medium" aria-hidden="true"></div>
+            <span class="reframe-drag-hint" id="reframeDragHint">Drag to reposition</span>
+          </div>
+          <p class="preview-note" id="editorPreviewStatus">Preparing a clean clip-only preview…</p>
+        </div>
+
+        <aside class="editor-sidebar">
+          <div class="control-block">
+            <label>Canvas</label>
+            <div class="mini-choice-row" id="editorFormatChoices">
+              <button type="button" data-value="landscape">16:9</button>
+              <button type="button" class="active" data-value="vertical">9:16</button>
+              <button type="button" data-value="original">Original</button>
+            </div>
+          </div>
+          <div class="control-block">
+            <label>Reframe</label>
+            <div class="mini-choice-row two" id="reframeModeChoices">
+              <button type="button" class="active" data-value="auto">Smart auto</button>
+              <button type="button" data-value="manual">Manual</button>
+            </div>
+            <p class="control-help" id="reframeHelp">Smart auto follows the likely speaker, recovers after scene cuts, and smooths camera movement.</p>
+            <div class="smart-reframe-info" id="smartReframeInfo" aria-live="polite">
+              <div class="smart-reframe-status"><span class="smart-status-dot" id="smartReframeDot"></span><strong id="smartReframeStatus">Analysing subjects…</strong></div>
+              <div class="smart-reframe-metrics" id="smartReframeMetrics" hidden>
+                <span><b id="smartDetectionValue">—</b> subject lock</span>
+                <span><b id="smartSceneValue">—</b> scene cuts</span>
+                <span><b id="smartZoomValue">—</b> framing</span>
+              </div>
+              <p id="smartReframeMessage">The analysis stays on this device and is reused during export.</p>
+            </div>
+          </div>
+          <div class="control-block" id="cropControl">
+            <div class="control-label-row"><label for="cropFocus">Horizontal focus</label><span id="cropLabel">Center</span></div>
+            <input type="range" id="cropFocus" min="0" max="100" value="50" />
+            <div class="range-labels"><span>Left</span><span>Center</span><span>Right</span></div>
+            <div class="control-label-row reframe-slider-label"><label for="cropVertical">Vertical focus</label><span id="cropVerticalLabel">Center</span></div>
+            <input type="range" id="cropVertical" min="0" max="100" value="50" />
+            <div class="range-labels"><span>Top</span><span>Center</span><span>Bottom</span></div>
+            <div class="control-label-row reframe-slider-label"><label for="cropZoom">Zoom</label><span id="cropZoomLabel">1.00×</span></div>
+            <input type="range" id="cropZoom" min="100" max="200" value="100" step="5" />
+            <div class="range-labels"><span>Fit</span><span>1.5×</span><span>2×</span></div>
+            <div class="reframe-keyframe-actions">
+              <button type="button" id="setCropKeyframeBtn">Set position here</button>
+              <button type="button" id="deleteCropKeyframeBtn" disabled>Delete position</button>
+            </div>
+            <p class="control-help" id="cropKeyframeHelp">Drag the preview, then save positions at different times. Clipmaker moves smoothly between them.</p>
+          </div>
+          <div class="control-block">
+            <div class="control-label-row">
+              <label>Captions</label>
+              <button class="toggle" id="captionToggle" data-on="true" aria-label="Toggle captions"><span class="toggle-knob"></span></button>
+            </div>
+            <div class="mini-choice-row" id="editorCaptionChoices">
+              <button type="button" class="active" data-value="bold">Bold</button>
+              <button type="button" data-value="clean">Clean</button>
+              <button type="button" data-value="karaoke">Karaoke</button>
+            </div>
+            <div class="caption-size-row">
+              <span>Size</span>
+              <div class="mini-choice-row" id="captionSizeChoices">
+                <button type="button" data-value="small">Small</button>
+                <button type="button" class="active" data-value="medium">Medium</button>
+                <button type="button" data-value="large">Large</button>
+              </div>
+            </div>
+            <select id="captionPosition" aria-label="Caption position">
+              <option value="bottom">Bottom</option>
+              <option value="center">Center</option>
+              <option value="top">Top</option>
+            </select>
+            <p class="control-help caption-layout-hint" id="captionLayoutHint">9:16 safe area · maximum 2 lines · preview matches export.</p>
+          </div>
+          <div class="control-block transcript-block">
+            <div class="control-label-row"><label for="captionText">Caption text</label><span>editable</span></div>
+            <textarea id="captionText" maxlength="5000" placeholder="Transcript for this clip"></textarea>
+          </div>
+        </aside>
+      </div>
+
+      <div class="timeline-toolbar">
+        <div class="timeline-heading"><span>Trim clip</span><small>Drag either handle, move the entire orange selection, or click anywhere to scrub.</small></div>
+        <div class="timeline-actions">
+          <button type="button" id="jumpInBtn" aria-label="Jump to clip start" title="Jump to IN (Home)">|◀</button>
+          <button type="button" id="playPauseBtn" class="transport-play" aria-label="Play selected clip" title="Play selection (Space)">▶</button>
+          <button type="button" id="jumpOutBtn" aria-label="Jump to clip end" title="Jump to OUT (End)">▶|</button>
+          <output id="playheadReadout">0:00.0</output>
+          <span class="timeline-total" id="timelineDurationReadout">/ 0:00.0</span>
+          <button type="button" id="setInBtn" title="Set IN at playhead (I)">Set IN here</button>
+          <button type="button" id="setOutBtn" title="Set OUT at playhead (O)">Set OUT here</button>
+        </div>
+      </div>
+      <div class="timeline-shortcuts" aria-label="Timeline keyboard shortcuts">
+        <span><kbd>Space</kbd> play</span>
+        <span><kbd>←</kbd><kbd>→</kbd> 0.1 sec</span>
+        <span><kbd>Shift</kbd> + arrows 1 sec</span>
+        <span><kbd>I</kbd> set in</span>
+        <span><kbd>O</kbd> set out</span>
+      </div>
+      <div class="timeline-ruler" id="timelineRuler" aria-hidden="true"></div>
+      <div class="editor-timeline" id="editorTimeline" tabindex="0" role="slider" aria-label="Video playhead" aria-valuemin="0" aria-valuemax="0" aria-valuenow="0">
+          <div class="editor-frames" id="editorFrames"></div>
+          <div class="trim-mask trim-mask-left" id="trimMaskLeft"></div>
+          <div class="trim-mask trim-mask-right" id="trimMaskRight"></div>
+          <div class="trim-region" id="trimRegion" role="group" aria-label="Selected clip range" title="Drag to move the selected range">
+            <button type="button" class="trim-handle trim-handle-left" id="trimLeft" aria-label="Drag clip start"><span id="trimLeftLabel">IN 0:00.0</span></button>
+            <button type="button" class="trim-handle trim-handle-right" id="trimRight" aria-label="Drag clip end"><span id="trimRightLabel">OUT 0:00.0</span></button>
+          </div>
+          <div class="timeline-playhead" id="timelinePlayhead" aria-hidden="true"><span></span></div>
+          <div class="timeline-scrub-tooltip" id="timelineScrubTooltip" aria-hidden="true">0:00.0</div>
+      </div>
+
+      <div class="caption-track-wrap" id="captionTrackWrap">
+        <span class="track-label">Captions</span>
+        <div class="caption-segment-track" id="captionSegmentTrack"></div>
+      </div>
+      <div class="reframe-track-wrap" id="reframeTrackWrap" hidden>
+        <span class="track-label">Reframe</span>
+        <div class="reframe-keyframe-track" id="reframeKeyframeTrack"></div>
+      </div>
+
+      <div class="trim-precision-grid">
+        <div class="precision-field">
+          <label for="trimStartInput">Clip starts at</label>
+          <div class="precision-control">
+            <button type="button" class="time-nudge" data-endpoint="start" data-nudge="-0.1" aria-label="Move start back 0.1 seconds">−0.1</button>
+            <input type="number" id="trimStartInput" min="0" step="0.1" inputmode="decimal" />
+            <button type="button" class="time-nudge" data-endpoint="start" data-nudge="0.1" aria-label="Move start forward 0.1 seconds">+0.1</button>
+          </div>
+        </div>
+        <div class="trim-summary">
+          <strong id="trimReadout">0:00.0 – 0:00.0</strong>
+          <span id="trimDurationReadout">0:00.0 selected</span>
+        </div>
+        <div class="precision-field">
+          <label for="trimEndInput">Clip ends at</label>
+          <div class="precision-control">
+            <button type="button" class="time-nudge" data-endpoint="end" data-nudge="-0.1" aria-label="Move end back 0.1 seconds">−0.1</button>
+            <input type="number" id="trimEndInput" min="0" step="0.1" inputmode="decimal" />
+            <button type="button" class="time-nudge" data-endpoint="end" data-nudge="0.1" aria-label="Move end forward 0.1 seconds">+0.1</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="speech-boundary-check" id="speechBoundaryCheck">
+        <span id="speechBoundaryStatus">Checking whether the clip starts and ends cleanly…</span>
+        <button type="button" id="snapSpeechBoundariesBtn" hidden>Snap to complete speech</button>
+      </div>
+
+      <section class="caption-segment-editor" id="captionSegmentEditorSection">
+        <div class="caption-editor-heading">
+          <div><span>Caption segments</span><small>Click a segment in the track to edit its words and timing.</small></div>
+          <span id="captionSegmentCount">0 segments</span>
+        </div>
+        <div class="caption-edit-panel" id="captionEditPanel" hidden>
+          <div class="caption-edit-copy">
+            <label for="captionSegmentText">Selected phrase</label>
+            <textarea id="captionSegmentText" maxlength="500" rows="2"></textarea>
+          </div>
+          <div class="caption-timing-fields">
+            <label>Start<input type="number" id="captionSegmentStart" min="0" step="0.05" /></label>
+            <label>End<input type="number" id="captionSegmentEnd" min="0" step="0.05" /></label>
+          </div>
+          <div class="caption-edit-actions">
+            <button type="button" id="updateCaptionSegmentBtn">Update phrase</button>
+            <button type="button" id="splitCaptionSegmentBtn">Split at playhead</button>
+            <button type="button" id="mergeCaptionSegmentBtn">Merge next</button>
+            <button type="button" class="danger-action" id="deleteCaptionSegmentBtn">Delete</button>
+          </div>
+          <p class="caption-edit-status" id="captionEditStatus"></p>
+        </div>
+      </section>
 
       <div class="editor-controls">
-        <div class="caption-toggle-row">
-          <span class="caption-style-label">captions</span>
-          <button class="toggle" id="captionToggle" data-on="true">
-            <span class="toggle-knob"></span>
-          </button>
-        </div>
-        <button class="btn-primary editor-export" id="exportBtn">Export edit</button>
+        <button type="button" class="btn-secondary" id="undoEditorBtn" disabled>Undo</button>
+        <button type="button" class="btn-secondary" id="resetEditorBtn">Reset changes</button>
+        <button class="btn-primary editor-export" id="exportBtn">Render this edit</button>
       </div>
       <p class="slate-hint" id="editorStatus"></p>
     </div>
@@ -113,6 +334,8 @@
     <div class="error-card">
       <p class="error-title">That didn't work.</p>
       <p class="error-detail" id="errorDetail"></p>
+      <p class="error-stage" id="errorStage"></p>
+      <button type="button" class="btn-secondary retry-job" id="errorRetryBtn" hidden>Retry from saved work</button>
     </div>
   </section>
 
@@ -124,6 +347,6 @@
   </div>
 </footer>
 
-<script src="script.js"></script>
+<script src="script.js?v=23"></script>
 </body>
 </html>

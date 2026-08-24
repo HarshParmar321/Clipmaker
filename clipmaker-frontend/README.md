@@ -13,8 +13,8 @@ backend over fetch().
    ```
 3. Open `http://localhost:5500` in your browser.
 
-If your backend runs on a different host/port, change `API_BASE` at the
-top of `script.js`.
+If port 8000 is busy during local development, open the frontend with a
+validated port override such as `http://localhost:5500/?api_port=8001`.
 
 ## Design notes
 
@@ -26,10 +26,8 @@ top of `script.js`.
   (`JobStatus` enum in `services/job_store.py`), so if you add a new
   pipeline stage on the backend, add it to the `STAGES` array in
   `script.js` too and it'll show up automatically.
-- Caption style pills are visual-only right now — they don't yet change
-  which style gets burned in, since the backend only has one preset
-  (`STYLE` dict in `caption_burner.py`). Wire this up once you add more
-  presets there.
+- Bold, Clean, and Karaoke caption controls are sent to the backend and match
+  the ASS/libass render presets used for exported clips.
 
 ## Before deploying
 

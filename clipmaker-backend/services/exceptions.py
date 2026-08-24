@@ -10,7 +10,14 @@ class VideoDownloadError(Exception):
     """Raised when a video could not be downloaded after all strategies
     were exhausted. `user_message` is safe to show directly in the UI."""
 
-    def __init__(self, user_message: str, technical_detail: str = ""):
+    def __init__(
+        self,
+        user_message: str,
+        technical_detail: str = "",
+        *,
+        retryable: bool = True,
+    ):
         self.user_message = user_message
         self.technical_detail = technical_detail
+        self.retryable = retryable
         super().__init__(user_message)

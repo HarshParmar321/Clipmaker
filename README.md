@@ -1,89 +1,127 @@
 # Clipmaker
 
-AI tool that turns a long video into short, captioned, clip-worthy segments
-— with a trim editor so you can adjust each clip's start/end and toggle
-captions on or off before exporting.
+Clipmaker turns a long YouTube video or uploaded video into short, captioned
+clips. The current Phase 1 architecture uses Supabase for metadata and a safe,
+job-scoped local filesystem for media.
 
-## Project structure
+## Phase 1 stack
 
+- FastAPI and Uvicorn
+- Groq Whisper transcription
+- Groq structured-output highlight selection
+- FFmpeg, libx264, and libass
+- Supabase PostgreSQL for jobs, clips, and artifact metadata
+- Optional Supabase access-token validation
+- Local media storage with automatic retention cleanup
+- Plain HTML, CSS, and JavaScript frontend
+
+## Creative controls and clip studio
+
+- Optional viewer brief guides highlight selection without being required.
+- Generate `16:9`, `9:16`, or source-aspect clips from the same video.
+- Bold, clean, and karaoke caption presets scale to each output canvas.
+- The editor uses a clean source-aspect preview for accurate 16:9/9:16
+  switching. Manual reframing supports draggable horizontal/vertical focus,
+  zoom, and timeline keyframes whose interpolation matches FFmpeg export.
+- Trim controls report whether the selected IN/OUT points are speech-safe and
+  can snap manual edits to complete spoken phrases.
+- Smart Reframe uses the local OpenCV YuNet model, persistent multi-face
+  tracks, mouth-motion evidence, scene-cut recovery, natural headroom, and a
+  speed-limited FFmpeg crop path. The Studio previews this planned path and
+  reports its confidence; Manual remains a precise override.
+- Users can request 3, 5, or 8 clips and choose quick, balanced, or deep
+  duration ranges.
+- Highlight candidates are ranked for hook, prompt relevance, completeness,
+  and shareability, then snapped to natural sentence or pause boundaries.
+- Candidates without a clean spoken ending are rejected instead of being cut
+  mid-thought; a short duration grace may be used to finish a sentence.
+- Quality scores are calibrated so one weak dimension caps the overall score;
+  semantically repetitive candidates are removed even when timestamps differ.
+- Processing exposes persisted percentage, stage, heartbeat, and clip counts.
+- Failed, cancelled, or restart-interrupted jobs can retry from saved source,
+  transcript, and completed clips where those artifacts still exist.
+
+## Storage lifecycle
+
+Every job is isolated under `clipmaker-backend/storage/jobs/{job_id}`:
+
+```text
+source/       uploaded or downloaded original
+temp/         audio and subtitle processing files
+outputs/      generated and edited clips
+thumbnails/   editor timeline frames
 ```
-clipmaker/
-├── clipmaker-backend/     FastAPI server
-│   ├── main.py                  boots server, serves /media static files
-│   ├── startup_checks.py        catches missing ffmpeg/libass immediately
-│   ├── routers/jobs.py          job creation, status, thumbnails, render
-│   ├── services/
-│   │   ├── downloader.py        multi-strategy YouTube downloader
-│   │   ├── exceptions.py        clean, user-facing error types
-│   │   ├── transcriber.py       Groq Whisper, word-level timestamps
-│   │   ├── highlight_detector.py Groq LLaMA picks clip-worthy segments
-│   │   ├── video_cutter.py      ffmpeg cutting + thumbnail extraction
-│   │   ├── caption_burner.py    word-by-word animated caption burn-in
-│   │   └── pipeline.py          orchestrates the full job
-│   └── README.md
-│
-└── clipmaker-frontend/    plain HTML/CSS/JS, no build step
-    ├── index.html                includes the trim editor panel
-    ├── style.css
-    ├── script.js                  drag-to-trim + caption toggle logic
-    └── README.md
-```
 
-## What's new: the trim editor
+- MP3, ASS, and other temporary files are deleted immediately.
+- Failed-job artifacts expire after 1 hour.
+- Thumbnails expire after 24 hours.
+- Source videos expire after 24 hours.
+- Final clips expire after 7 days.
+- Cleanup runs at startup and every 30 minutes.
 
-Click **"Edit clip"** on any generated clip to open a trim editor:
-- **Timeline with frame thumbnails** — drag the amber handles to adjust
-  where the clip starts and ends.
-- **Captions toggle** — on by default; switch off to export without
-  captions.
-- **Export edit** — re-cuts and (optionally) re-capions from the
-  *original* source video, so quality never degrades from re-editing a
-  clip. The original clip is untouched — exports are non-destructive.
+All durations are configurable in `.env`.
 
-This was tested end-to-end against real ffmpeg output (not just
-route-registration checks) before being handed over: real cutting, real
-caption burn-in with captions both on and off, real thumbnail
-extraction, and confirmed the clip preview actually plays inline in a
-browser rather than forcing a download.
+## Setup
 
-## Run both together
+Backend:
 
-Open two terminals.
-
-**Terminal 1 — backend:**
 ```bash
 cd clipmaker-backend
-python3 -m venv venv && source venv/bin/activate
+python3 -m venv .venv
+source .venv/bin/activate
 pip install -r requirements.txt
-cp .env.example .env        # add your Groq API key
+cp .env.example .env
+```
+
+Follow [clipmaker-backend/SUPABASE_SETUP.md](clipmaker-backend/SUPABASE_SETUP.md),
+then add the Groq and Supabase values to `.env`.
+
+Run the API:
+
+```bash
 uvicorn main:app --reload --port 8000
 ```
 
-**Terminal 2 — frontend:**
+Run the frontend in another terminal:
+
 ```bash
 cd clipmaker-frontend
 python3 -m http.server 5500
 ```
 
-Open **http://localhost:5500**.
+Open <http://localhost:5500>. API documentation is available at
+<http://localhost:8000/docs>.
 
-## Known issues already solved (see full history in this project)
+## Tests
 
-- **YouTube "Please sign in" / format errors** — `downloader.py` tries
-  multiple client strategies automatically and fails cleanly with a
-  helpful message if all are blocked. Upload is the fully reliable path.
-- **ffmpeg captions failing silently** — fixed by capturing real ffmpeg
-  stderr on error, and a startup check that warns immediately if your
-  `ffmpeg` lacks `libass` support (common on Mac with the default
-  Homebrew formula — fix: `brew install homebrew-ffmpeg/ffmpeg/ffmpeg`
-  after tapping `homebrew-ffmpeg/ffmpeg`).
-- **Clips not playing in browser** — was caused by the download endpoint
-  forcing `Content-Disposition: attachment`. Clip previews now use a
-  separate `/media` static route with no forced download.
+```bash
+cd clipmaker-backend
+.venv/bin/python -m unittest discover -s tests -v
+```
 
-## Common setup issues
+## Quality evaluation
 
-- **`pip: command not found`** — activate the venv first:
-  `python3 -m venv venv && source venv/bin/activate`
-- **Caption burning fails** — check `ffmpeg -filters | grep -i "\bass\b"`
-  returns a result. If not, see the libass fix above.
+The automated test suite protects code behavior. Product quality is evaluated
+separately on a private, repeatable 15-scenario video suite covering single and
+multiple speakers, difficult detection, scene changes, B-roll, composition,
+captions, and speech boundaries.
+
+```bash
+cd clipmaker-backend
+.venv/bin/python quality_eval.py init
+.venv/bin/python quality_eval.py run --render
+```
+
+The evaluator produces local JSON and HTML reports, supports 1–5 human review
+ratings, and compares candidate results with a known-good baseline. See
+[clipmaker-backend/evaluation/README.md](clipmaker-backend/evaluation/README.md).
+
+## Safe cleanup
+
+```bash
+cd clipmaker-backend
+.venv/bin/python cleanup_storage.py --dry-run
+.venv/bin/python cleanup_storage.py --execute
+```
+
+Run dry-run first whenever retention settings change.

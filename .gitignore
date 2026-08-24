@@ -12,4 +12,6 @@ storage/
 *.mp4
 *.mp3
 *.ass
-
+clipmaker-backend/evaluation/cases.local.json
+clipmaker-backend/evaluation/videos/
+clipmaker-backend/evaluation/results/

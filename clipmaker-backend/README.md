@@ -1,77 +1,82 @@
 # Clipmaker API
 
-Backend that takes a video (link or upload), transcribes it, uses an LLM to
-pick the best short-form clip segments, cuts them, and burns in animated
-word-by-word captions.
+FastAPI backend for downloading/uploading videos, transcribing speech, finding
+highlight segments, cutting clips, and burning word-timed captions.
 
-## Setup
+## Media versus metadata
 
-```bash
-python -m venv venv
-source venv/bin/activate        # Windows: venv\Scripts\activate
-pip install -r requirements.txt
-```
+- Supabase PostgreSQL stores jobs, clips, artifact metadata, expiry times, and
+  optional user ownership.
+- Video and processing files remain under `storage/jobs/{job_id}`.
+- The service never stores video bytes inside PostgreSQL.
+- When Supabase is not configured, startup logs a warning and uses an in-memory
+  metadata fallback for setup and tests.
 
-You also need **ffmpeg** installed on your system (not a pip package):
-- Mac: `brew install ffmpeg`
-- Ubuntu/Debian: `sudo apt install ffmpeg`
-- Windows: download from ffmpeg.org and add to PATH
-
-Copy `.env.example` to `.env` and add your Groq API key (free at
-console.groq.com/keys):
-
-```bash
-cp .env.example .env
-```
+Apply the SQL files in `supabase/migrations/` in numeric order before enabling
+Supabase. Migration 004 persists each clip's quality-score breakdown and
+migration 005 adds progress, cancellation, retry, and restart recovery.
+See [SUPABASE_SETUP.md](SUPABASE_SETUP.md).
 
 ## Run
 
 ```bash
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+cp .env.example .env
 uvicorn main:app --reload --port 8000
 ```
 
-Visit `http://localhost:8000/docs` for interactive API docs (FastAPI's
-built-in Swagger UI) - use this to test endpoints before wiring up the
-frontend.
+FFmpeg must include `libx264`, `libmp3lame`, and the `ass`/libass filter.
 
 ## API flow
 
-1. `POST /api/jobs` with `{"url": "https://youtube.com/..."}` -> returns `job_id`
-   OR `POST /api/jobs/upload` with a multipart file -> returns `job_id`
-2. Poll `GET /api/jobs/{job_id}` until `status` is `"done"` (or `"failed"`)
-3. Each clip in the response has a `download_url` - fetch that to get the
-   final captioned .mp4
+1. `POST /api/jobs` with a YouTube URL or `POST /api/jobs/upload`.
+2. Poll `GET /api/jobs/{job_id}`.
+3. Preview, download, request thumbnails, or render a bounded edit.
+4. Expired media returns HTTP 410 while metadata remains available.
 
-## Project structure
+Active jobs support `POST /api/jobs/{job_id}/cancel`. Failed or cancelled jobs
+that still have usable input support `POST /api/jobs/{job_id}/retry`.
 
+Studio previews are always cut from the uncropped source segment. Manual
+renders accept `crop_x`, `crop_y`, `crop_zoom`, and ordered `crop_keyframes` so
+the browser canvas and FFmpeg output share the same pan/zoom geometry.
+
+Vertical Auto renders use the bundled local YuNet detector. Smart Reframe
+associates multiple faces across frames, uses mouth motion as one signal for
+the likely speaker, resets tracking on scene cuts, selects conservative zoom,
+adds natural headroom, and limits crop speed. The editor requests
+`GET /api/jobs/{job_id}/clips/{clip_id}/reframe-analysis` to preview the exact
+cached path that export will reuse. No video frames leave the machine.
+
+The API accepts Supabase Bearer tokens. Keep `AUTH_REQUIRED=false` until the
+frontend sign-in flow is connected, then change it to `true`.
+
+## Product-quality gate
+
+Run `quality_eval.py` against the private 15-scenario suite before changing the
+tracking or rendering algorithm. It measures detection coverage, confidence,
+crop speed, edge holds, subject switches, centered fallback, and real 9:16
+render integrity. Optional human ratings cover active-speaker correctness,
+composition, stability, speech completeness, and caption readability.
+
+```bash
+.venv/bin/python quality_eval.py init
+.venv/bin/python quality_eval.py run --render
 ```
-main.py                    FastAPI app entrypoint
-config.py                  env vars + storage paths
-routers/jobs.py            HTTP endpoints
-services/job_store.py      in-memory job tracking (swap for Redis/DB later)
-services/pipeline.py       orchestrates the full pipeline per job
-services/downloader.py     yt-dlp video download
-services/transcriber.py    Groq Whisper transcription (word-level timestamps)
-services/highlight_detector.py   Groq LLaMA picks the best clip segments
-services/video_cutter.py   ffmpeg clip cutting + thumbnail extraction
-services/caption_burner.py .ass caption generation + ffmpeg burn-in
-```
 
-## Known limitations (v1 / demo scope)
+See [evaluation/README.md](evaluation/README.md) for baseline comparisons and
+the local-video setup. Evaluation videos, ratings, renders, and reports are
+ignored by Git.
 
-- Videos capped at 15 minutes (see `MAX_DURATION_SECONDS` in `downloader.py`)
-  to keep processing time reasonable on free-tier hosting.
-- YouTube links only for now - other platforms need auth cookies that break
-  often when the platform changes its API.
-- Jobs are stored in memory - restarting the server loses job history.
-- One caption style for now (see `STYLE` dict in `caption_burner.py`).
+## Safety controls
 
-## Next steps
-
-- Build the React frontend against this API (upload/link input, polling,
-  timeline with thumbnails, clip list).
-- Add `GET /api/jobs/{job_id}/thumbnails` if you want frame thumbnails for
-  the source video timeline (the extraction function already exists in
-  `video_cutter.py`, just needs a route + static file serving).
-- Swap the in-memory job store for Redis or a Supabase table once this
-  needs to handle more than one user at a time.
+- Server-generated upload paths; client filenames are never trusted.
+- 500 MB upload limit by default.
+- 15-minute duration limit for both URL and uploaded videos.
+- YouTube-only URL validation.
+- Validated, non-overlapping model-generated highlights.
+- Per-job ownership checks when an authenticated user created the job.
+- Temporary-file cleanup in `finally` blocks.
+- Scheduled expiry cleanup with a dry-run command.

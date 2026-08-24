@@ -22,12 +22,10 @@ import logging
 import os
 from pathlib import Path
 import yt_dlp
-from config import DOWNLOADS_DIR
+from config import MAX_VIDEO_DURATION_SECONDS
 from services.exceptions import VideoDownloadError
 
 logger = logging.getLogger("clipmaker.downloader")
-
-MAX_DURATION_SECONDS = 15 * 60  # keep demo videos short so processing stays fast
 
 COOKIES_BROWSER = os.getenv("YTDLP_COOKIES_BROWSER", "").strip()
 COOKIES_FILE = os.getenv("YTDLP_COOKIES_FILE", "").strip()
@@ -39,8 +37,9 @@ COOKIES_FILE = os.getenv("YTDLP_COOKIES_FILE", "").strip()
 CLIENT_STRATEGIES = ["default", "tv", "android", "ios"]
 
 
-def _build_base_opts(job_id: str) -> dict:
-    output_template = str(DOWNLOADS_DIR / f"{job_id}.%(ext)s")
+def _build_base_opts(output_dir: Path) -> dict:
+    output_dir.mkdir(parents=True, exist_ok=True)
+    output_template = str(output_dir / "original.%(ext)s")
     opts = {
         "format": "bestvideo[height<=720]+bestaudio/best[height<=720]/best",
         "merge_output_format": "mp4",
@@ -56,10 +55,10 @@ def _build_base_opts(job_id: str) -> dict:
     return opts
 
 
-def _try_strategy(url: str, job_id: str, client: str) -> dict:
+def _try_strategy(url: str, output_dir: Path, client: str) -> dict:
     """Attempts one client strategy. Returns yt-dlp's info dict on success,
     raises on failure (caller decides whether to try the next strategy)."""
-    opts = _build_base_opts(job_id)
+    opts = _build_base_opts(output_dir)
     if client != "default":
         opts["extractor_args"] = {"youtube": {"player_client": [client]}}
 
@@ -75,24 +74,25 @@ def _try_strategy(url: str, job_id: str, client: str) -> dict:
             raise yt_dlp.utils.DownloadError(f"'{client}' client returned no real video formats")
 
         duration = info.get("duration") or 0
-        if duration > MAX_DURATION_SECONDS:
+        if duration > MAX_VIDEO_DURATION_SECONDS:
             # not retryable with a different client - this is a real limit
             raise VideoDownloadError(
                 f"That video is {int(duration // 60)} minutes long. "
-                f"For now, please use videos under {MAX_DURATION_SECONDS // 60} minutes."
+                f"For now, please use videos under {MAX_VIDEO_DURATION_SECONDS // 60} minutes.",
+                retryable=False,
             )
 
         ydl.download([url])
         return info
 
 
-def download_video(url: str, job_id: str) -> Path:
+def download_video(url: str, job_id: str, output_dir: Path) -> Path:
     last_error = None
 
     for client in CLIENT_STRATEGIES:
         try:
             logger.info(f"[{job_id}] trying yt-dlp client strategy: {client}")
-            _try_strategy(url, job_id, client)
+            _try_strategy(url, output_dir, client)
             logger.info(f"[{job_id}] succeeded with client strategy: {client}")
             break
         except VideoDownloadError:
@@ -103,6 +103,8 @@ def download_video(url: str, job_id: str) -> Path:
             continue
     else:
         # every strategy in CLIENT_STRATEGIES failed
+        for partial in output_dir.glob("original.*"):
+            partial.unlink(missing_ok=True)
         raise VideoDownloadError(
             user_message=(
                 "We couldn't fetch this video right now — YouTube may be "
@@ -113,7 +115,7 @@ def download_video(url: str, job_id: str) -> Path:
             technical_detail=str(last_error),
         )
 
-    matches = list(DOWNLOADS_DIR.glob(f"{job_id}.*"))
+    matches = [path for path in output_dir.glob("original.*") if path.suffix != ".part"]
     if not matches:
         raise VideoDownloadError(
             user_message="The download finished but the file went missing. Please try again.",
