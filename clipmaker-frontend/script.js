@@ -80,17 +80,6 @@ function setupChoices(containerId, onChange = () => {}) {
   });
 }
 
-setupChoices("contentModeChoices", (value) => {
-  const formatButtons = el("initialFormatChoices").querySelectorAll("button[data-value]");
-  if (value === "gaming") {
-    activateChoice("initialFormatChoices", "vertical");
-    formatButtons.forEach((button) => { button.disabled = button.dataset.value !== "vertical"; });
-    slateHint.textContent = "Gaming mode keeps gameplay visible and enlarges the OBS facecam for 9:16.";
-  } else {
-    formatButtons.forEach((button) => { button.disabled = false; });
-    slateHint.textContent = "Works best with videos under 15 minutes.";
-  }
-});
 setupChoices("initialFormatChoices");
 setupChoices("initialCaptionChoices");
 setupChoices("clipCountChoices");
@@ -214,7 +203,6 @@ generateBtn.addEventListener("click", async () => {
     creative_prompt: creativePrompt.value.trim() || null,
     output_format: selectedValue("initialFormatChoices") || "vertical",
     caption_style: selectedValue("initialCaptionChoices") || "bold",
-    content_mode: selectedValue("contentModeChoices") || "general",
     target_clip_count: Number(selectedValue("clipCountChoices") || 5),
     min_clip_duration: CLIP_LENGTHS[selectedValue("clipLengthChoices") || "balanced"].min,
     max_clip_duration: CLIP_LENGTHS[selectedValue("clipLengthChoices") || "balanced"].max,
@@ -231,7 +219,6 @@ generateBtn.addEventListener("click", async () => {
       if (settings.creative_prompt) formData.append("creative_prompt", settings.creative_prompt);
       formData.append("output_format", settings.output_format);
       formData.append("caption_style", settings.caption_style);
-      formData.append("content_mode", settings.content_mode);
       formData.append("target_clip_count", String(settings.target_clip_count));
       formData.append("min_clip_duration", String(settings.min_clip_duration));
       formData.append("max_clip_duration", String(settings.max_clip_duration));
@@ -493,8 +480,6 @@ let cropDragState = null;
 let previewAnimationFrame = null;
 let smartReframeAnalysis = null;
 let smartReframeRequest = 0;
-let gamingLayoutAnalysis = null;
-let gamingLayoutRequest = 0;
 
 const editorSection = el("editorSection");
 const editorVideo = el("editorVideo");
@@ -550,12 +535,6 @@ const smartDetectionValue = el("smartDetectionValue");
 const smartSceneValue = el("smartSceneValue");
 const smartZoomValue = el("smartZoomValue");
 const smartReframeMessage = el("smartReframeMessage");
-const layoutControl = el("layoutControl");
-const layoutHelp = el("layoutHelp");
-const gamingLayoutInfo = el("gamingLayoutInfo");
-const gamingLayoutDot = el("gamingLayoutDot");
-const gamingLayoutStatus = el("gamingLayoutStatus");
-const gamingLayoutMessage = el("gamingLayoutMessage");
 const reframeDragHint = el("reframeDragHint");
 const reframeTrackWrap = el("reframeTrackWrap");
 const reframeKeyframeTrack = el("reframeKeyframeTrack");
@@ -568,50 +547,13 @@ const exportBtn = el("exportBtn");
 const editorStatus = el("editorStatus");
 const editorSaveState = el("editorSaveState");
 
-setupChoices("editorFormatChoices", (value) => {
-  if (value !== "vertical" && captionPosition.value === "gaming") {
-    captionPosition.value = "bottom";
-  } else if (
-    value === "vertical"
-    && selectedValue("layoutModeChoices") === "gameplay_reaction"
-    && captionPosition.value === "bottom"
-  ) {
-    captionPosition.value = "gaming";
-  }
-  markEditorDirty();
-  renderCaptionSegments();
-  updateEditorPreview();
-  if (value === "vertical" && selectedValue("layoutModeChoices") === "gameplay_reaction" && editingClip) {
-    void loadGamingLayout(editingClip);
-  }
-});
+setupChoices("editorFormatChoices", () => { markEditorDirty(); renderCaptionSegments(); updateEditorPreview(); });
 setupChoices("editorCaptionChoices", () => { markEditorDirty(); updateCaptionPreview(); });
 setupChoices("captionSizeChoices", () => { markEditorDirty(); updateCaptionPreview(); });
 setupChoices("reframeModeChoices", () => {
   markEditorDirty();
   renderCropKeyframes();
   updateEditorPreview();
-});
-setupChoices("layoutModeChoices", (value) => {
-  if (value === "gameplay_reaction" && captionPosition.value === "bottom") {
-    captionPosition.value = "gaming";
-  } else if (value === "smart" && captionPosition.value === "gaming") {
-    captionPosition.value = "bottom";
-  }
-  markEditorDirty();
-  renderCropKeyframes();
-  updateEditorPreview();
-  if (value === "gameplay_reaction" && editingClip && !gamingLayoutAnalysis) {
-    void loadGamingLayout(editingClip);
-  } else if (value === "smart" && editingClip && !smartReframeAnalysis) {
-    void loadSmartReframe(editingClip);
-  }
-});
-setupChoices("facecamCornerChoices", () => {
-  gamingLayoutAnalysis = null;
-  markEditorDirty();
-  drawEditorPreview();
-  if (editingClip) void loadGamingLayout(editingClip);
 });
 
 function clamp(value, minimum, maximum) {
@@ -643,9 +585,6 @@ function snapshotEditorState() {
     captionStyle: selectedValue("editorCaptionChoices"),
     captionSize: selectedValue("captionSizeChoices"),
     reframeMode: selectedValue("reframeModeChoices"),
-    layoutMode: selectedValue("layoutModeChoices"),
-    facecamCorner: selectedValue("facecamCornerChoices"),
-    gamingLayoutAnalysis: gamingLayoutAnalysis ? { ...gamingLayoutAnalysis, region: { ...gamingLayoutAnalysis.region } } : null,
     selectedCaptionGroupIndex,
   };
 }
@@ -675,9 +614,6 @@ function restoreEditorState(state) {
   activateChoice("editorCaptionChoices", state.captionStyle);
   activateChoice("captionSizeChoices", state.captionSize);
   activateChoice("reframeModeChoices", state.reframeMode);
-  activateChoice("layoutModeChoices", state.layoutMode || "smart");
-  activateChoice("facecamCornerChoices", state.facecamCorner || "auto");
-  gamingLayoutAnalysis = state.gamingLayoutAnalysis || null;
   syncCaptionTextFromWords();
   seekTo(state.playheadSec);
   updateTrimUI();
@@ -764,76 +700,6 @@ async function loadSmartReframe(clip) {
   }
 }
 
-function facecamRegionForCorner(corner = "bottom_right") {
-  const resolved = corner === "auto" ? "bottom_right" : corner;
-  const width = .32;
-  const height = .34;
-  const inset = .015;
-  return {
-    x: resolved.endsWith("left") ? inset : 1 - width - inset,
-    y: resolved.startsWith("top") ? inset : 1 - height - inset,
-    width,
-    height,
-  };
-}
-
-function activeFacecamRegion() {
-  return gamingLayoutAnalysis?.region
-    || facecamRegionForCorner(selectedValue("facecamCornerChoices") || "auto");
-}
-
-function renderGamingLayoutState(state = "loading", message = "") {
-  gamingLayoutDot.className = `smart-status-dot ${state}`;
-  if (state === "loading") {
-    gamingLayoutStatus.textContent = "Locating OBS facecam…";
-    gamingLayoutMessage.textContent = "Sampling the clip for a small, stable face in a screen corner.";
-    return;
-  }
-  if (!gamingLayoutAnalysis) {
-    gamingLayoutStatus.textContent = "Using selected corner";
-    gamingLayoutMessage.textContent = message || "Review the preview and select the correct facecam corner if needed.";
-    return;
-  }
-  const percentage = Math.round(Number(gamingLayoutAnalysis.detection_ratio || 0) * 100);
-  gamingLayoutStatus.textContent = gamingLayoutAnalysis.used_fallback
-    ? `Corner fallback · ${gamingLayoutAnalysis.corner.replace("_", " ")}`
-    : `Facecam found · ${percentage}% lock`;
-  gamingLayoutMessage.textContent = gamingLayoutAnalysis.message || message;
-}
-
-async function loadGamingLayout(clip) {
-  const request = ++gamingLayoutRequest;
-  gamingLayoutAnalysis = null;
-  renderGamingLayoutState("loading");
-  drawEditorPreview();
-  const corner = selectedValue("facecamCornerChoices") || "auto";
-  try {
-    const analysisUrl = clip.gaming_analysis_url
-      || `/api/jobs/${currentJobId}/clips/${clip.id}/gaming-analysis`;
-    const separator = analysisUrl.includes("?") ? "&" : "?";
-    const response = await fetch(`${API_BASE}${analysisUrl}${separator}corner=${encodeURIComponent(corner)}`, { cache: "no-store" });
-    if (!response.ok) throw new Error(await responseError(response, "Gaming layout analysis unavailable."));
-    const data = await response.json();
-    if (request !== gamingLayoutRequest || editingClip !== clip) return;
-    gamingLayoutAnalysis = {
-      ...data,
-      region: {
-        x: Number(data.region.x),
-        y: Number(data.region.y),
-        width: Number(data.region.width),
-        height: Number(data.region.height),
-      },
-    };
-    renderGamingLayoutState(data.used_fallback ? "limited" : "ready");
-    drawEditorPreview();
-  } catch (error) {
-    if (request !== gamingLayoutRequest || editingClip !== clip) return;
-    gamingLayoutAnalysis = null;
-    renderGamingLayoutState("limited", error.message);
-    drawEditorPreview();
-  }
-}
-
 async function openEditor(clip) {
   editingClip = clip;
   clipDurationSec = Math.max(clip.end - clip.start, 0.1);
@@ -855,10 +721,7 @@ async function openEditor(clip) {
   cropZoom.value = "100";
   cropKeyframes = [];
   smartReframeAnalysis = null;
-  gamingLayoutAnalysis = null;
-  activateChoice("facecamCornerChoices", "auto");
-  const initialLayout = clip.layout_mode || "smart";
-  captionPosition.value = initialLayout === "gameplay_reaction" ? "gaming" : "bottom";
+  captionPosition.value = "bottom";
   editorCaptionWords = (Array.isArray(clip.caption_words) ? clip.caption_words : [])
     .map((word) => ({ ...word, start: Number(word.start), end: Number(word.end) }));
   syncCaptionTextFromWords();
@@ -866,7 +729,6 @@ async function openEditor(clip) {
   activateChoice("editorCaptionChoices", clip.caption_style || "bold");
   activateChoice("captionSizeChoices", "medium");
   activateChoice("reframeModeChoices", "auto");
-  activateChoice("layoutModeChoices", initialLayout);
   editorStatus.textContent = "";
   editorStatus.style.color = "";
   captionEditStatus.textContent = "";
@@ -891,8 +753,7 @@ async function openEditor(clip) {
   renderCaptionSegments();
   renderCropKeyframes();
   updateEditorPreview();
-  if (initialLayout === "gameplay_reaction") void loadGamingLayout(clip);
-  else void loadSmartReframe(clip);
+  void loadSmartReframe(clip);
   editorSection.scrollIntoView({ behavior: "smooth", block: "start" });
 
   try {
@@ -932,8 +793,6 @@ function closeEditor() {
   cropKeyframes = [];
   smartReframeAnalysis = null;
   smartReframeRequest += 1;
-  gamingLayoutAnalysis = null;
-  gamingLayoutRequest += 1;
   cropDragState = null;
   if (previewAnimationFrame !== null) cancelAnimationFrame(previewAnimationFrame);
   previewAnimationFrame = null;
@@ -949,22 +808,12 @@ function updateEditorPreview() {
   const format = selectedValue("editorFormatChoices") || "vertical";
   editorPreviewStage.dataset.format = format;
   const reframeMode = selectedValue("reframeModeChoices") || "auto";
-  const gamingLayout = format === "vertical" && selectedValue("layoutModeChoices") === "gameplay_reaction";
-  layoutControl.hidden = format !== "vertical";
   cropControl.hidden = format === "original" || reframeMode === "auto";
-  smartReframeInfo.hidden = gamingLayout || format === "original" || reframeMode !== "auto";
-  gamingLayoutInfo.hidden = !gamingLayout;
+  smartReframeInfo.hidden = format === "original" || reframeMode !== "auto";
   reframeDragHint.hidden = format === "original" || reframeMode !== "manual";
-  layoutHelp.textContent = gamingLayout
-    ? "Gameplay fills the upper 65%; the OBS reaction camera is enlarged into the lower 35%."
-    : "Speaker focus follows the main person for a clean portrait crop.";
-  reframeHelp.textContent = gamingLayout
-    ? (reframeMode === "manual"
-      ? "Manual mode repositions the gameplay view; the reaction crop stays locked to the selected corner."
-      : "Auto keeps the gameplay centered while the detected reaction camera stays visible below.")
-    : (reframeMode === "manual"
-      ? "Manual preview matches the exported crop. Drag the video and save positions over time."
-      : "Smart auto follows the likely speaker, recovers after scene cuts, and smooths camera movement. The preview shows its planned path.");
+  reframeHelp.textContent = reframeMode === "manual"
+    ? "Manual preview matches the exported crop. Drag the video and save positions over time."
+    : "Smart auto follows the likely speaker, recovers after scene cuts, and smooths camera movement. The preview shows its planned path.";
   renderCropKeyframes();
   syncCropControlsForPlayhead();
   drawEditorPreview();
@@ -1064,27 +913,6 @@ function drawEditorPreview() {
   context.fillStyle = "#050505";
   context.fillRect(0, 0, canvasWidth, canvasHeight);
   if (editorVideo.readyState < 2 || !editorVideo.videoWidth) return;
-  const gamingLayout = selectedValue("editorFormatChoices") === "vertical"
-    && selectedValue("layoutModeChoices") === "gameplay_reaction";
-  if (gamingLayout) {
-    const gameplayHeight = Math.round(canvasHeight * .65);
-    const focus = selectedValue("reframeModeChoices") === "manual"
-      ? cropAtTime(editorVideo.currentTime || playheadSec)
-      : { x: .5, y: .5 };
-    drawSourceCover(context, { x: 0, y: 0, width: 1, height: 1 }, 0, 0, canvasWidth, gameplayHeight, focus);
-    drawSourceCover(
-      context,
-      activeFacecamRegion(),
-      0,
-      gameplayHeight,
-      canvasWidth,
-      canvasHeight - gameplayHeight,
-      { x: .5, y: .45 },
-    );
-    context.fillStyle = "rgba(0,0,0,.9)";
-    context.fillRect(0, gameplayHeight - Math.max(2, Math.round(canvasHeight * .003)), canvasWidth, Math.max(4, Math.round(canvasHeight * .006)));
-    return;
-  }
   const crop = previewCropGeometry();
   try {
     context.drawImage(
@@ -1100,26 +928,6 @@ function drawEditorPreview() {
     );
   } catch {
     // Metadata can become ready one event before the decoded frame is drawable.
-  }
-}
-
-function drawSourceCover(context, region, dx, dy, destinationWidth, destinationHeight, focus = { x: .5, y: .5 }) {
-  const sourceWidth = editorVideo.videoWidth;
-  const sourceHeight = editorVideo.videoHeight;
-  const regionX = clamp(Number(region.x), 0, 1) * sourceWidth;
-  const regionY = clamp(Number(region.y), 0, 1) * sourceHeight;
-  const regionWidth = clamp(Number(region.width), .02, 1 - Number(region.x)) * sourceWidth;
-  const regionHeight = clamp(Number(region.height), .02, 1 - Number(region.y)) * sourceHeight;
-  const targetRatio = destinationWidth / Math.max(destinationHeight, 1);
-  const sourceRatio = regionWidth / Math.max(regionHeight, 1);
-  const cropWidth = sourceRatio > targetRatio ? regionHeight * targetRatio : regionWidth;
-  const cropHeight = sourceRatio > targetRatio ? regionHeight : regionWidth / targetRatio;
-  const sx = regionX + (regionWidth - cropWidth) * clamp(focus.x, 0, 1);
-  const sy = regionY + (regionHeight - cropHeight) * clamp(focus.y, 0, 1);
-  try {
-    context.drawImage(editorVideo, sx, sy, cropWidth, cropHeight, dx, dy, destinationWidth, destinationHeight);
-  } catch {
-    // The browser may report metadata before the first decoded frame is drawable.
   }
 }
 
@@ -1154,8 +962,7 @@ function upsertCropKeyframe(time = playheadSec) {
 function renderCropKeyframes() {
   const manual = selectedValue("reframeModeChoices") === "manual";
   const format = selectedValue("editorFormatChoices") || "vertical";
-  const gamingLayout = format === "vertical" && selectedValue("layoutModeChoices") === "gameplay_reaction";
-  const points = manual ? cropKeyframes : (gamingLayout ? [] : (smartReframeAnalysis?.points || []));
+  const points = manual ? cropKeyframes : (smartReframeAnalysis?.points || []);
   reframeTrackWrap.hidden = format === "original" || (!manual && !points.length);
   reframeKeyframeTrack.innerHTML = "";
   points.forEach((point, index) => {
@@ -1288,14 +1095,10 @@ function updateCaptionLayoutPreview() {
   captionPreview.style.setProperty("--caption-outline", `${(preset.outline / layout.width) * 100}cqw`);
   captionPreview.style.setProperty("--caption-shadow", `${(preset.shadow / layout.width) * 100}cqw`);
   captionPreview.style.setProperty("--caption-safe-x", `${layout.safeX}%`);
-  const safeV = captionPosition.value === "gaming"
-    ? 34
-    : captionPosition.value === "top" ? layout.top : layout.bottom;
+  const safeV = captionPosition.value === "top" ? layout.top : layout.bottom;
   captionPreview.style.setProperty("--caption-safe-v", `${safeV}%`);
   const formatLabel = layout.format === "original" ? "Original" : layout.orientation === "vertical" ? "9:16" : "16:9";
-  captionLayoutHint.textContent = captionPosition.value === "gaming"
-    ? `Gameplay boundary · ${fontSize}px export type · captions avoid the HUD and face.`
-    : `${formatLabel} safe area · ${fontSize}px export type · maximum 2 lines.`;
+  captionLayoutHint.textContent = `${formatLabel} safe area · ${fontSize}px export type · maximum 2 lines.`;
 }
 
 function captionGroupsDetailed(words = editorCaptionWords, layout = captionLayoutForPreview()) {
@@ -2040,11 +1843,6 @@ exportBtn.addEventListener("click", async () => {
   editorStatus.style.color = "";
   try {
     const reframeMode = selectedValue("reframeModeChoices") || "auto";
-    const outputFormat = selectedValue("editorFormatChoices") || "vertical";
-    const layoutMode = outputFormat === "vertical"
-      ? (selectedValue("layoutModeChoices") || "smart")
-      : "smart";
-    const facecamCorner = selectedValue("facecamCornerChoices") || "auto";
     const response = await fetch(`${API_BASE}${editingClip.render_url}`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -2052,7 +1850,7 @@ exportBtn.addEventListener("click", async () => {
         start: trimStartSec,
         end: trimEndSec,
         captions: captionToggle.dataset.on === "true",
-        output_format: outputFormat,
+        output_format: selectedValue("editorFormatChoices") || "vertical",
         caption_style: selectedValue("editorCaptionChoices") || "bold",
         caption_position: captionPosition.value,
         caption_size: selectedValue("captionSizeChoices") || "medium",
@@ -2063,9 +1861,6 @@ exportBtn.addEventListener("click", async () => {
         crop_zoom: reframeMode === "manual" ? Number(cropZoom.value) / 100 : 1,
         crop_keyframes: reframeMode === "manual" ? cropKeyframesForExport(trimStartSec, trimEndSec) : [],
         reframe_mode: reframeMode,
-        layout_mode: layoutMode,
-        facecam_corner: facecamCorner,
-        facecam_region: layoutMode === "gameplay_reaction" ? activeFacecamRegion() : null,
       }),
     });
     if (!response.ok) throw new Error(await responseError(response, "Export failed."));

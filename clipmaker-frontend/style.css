@@ -270,7 +270,6 @@ a { color: var(--amber); }
 .setting-group { border: 0; padding: 0; margin: 0; min-width: 0; }
 .setting-group legend { width: 100%; }
 .choice-row { display: grid; grid-template-columns: repeat(3, 1fr); gap: 7px; }
-.choice-row.two-options { grid-template-columns: repeat(2, 1fr); }
 .choice-btn {
   min-width: 0;
   padding: 10px 8px;
@@ -281,7 +280,6 @@ a { color: var(--amber); }
   cursor: pointer;
   text-align: left;
 }
-.choice-btn:disabled { opacity: .38; cursor: not-allowed; }
 .choice-btn b, .choice-btn span { display: block; }
 .choice-btn b { color: var(--bone); font-size: 13px; margin-bottom: 2px; }
 .choice-btn span { font-size: 10px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -688,7 +686,6 @@ a { color: var(--amber); }
 }
 .caption-preview:empty { display: none; }
 .caption-preview[data-position="bottom"] { bottom: var(--caption-safe-v, 8%); }
-.caption-preview[data-position="gaming"] { bottom: var(--caption-safe-v, 34%); }
 .caption-preview[data-position="top"] { top: var(--caption-safe-v, 13%); }
 .caption-preview[data-position="center"] { top: 50%; transform: translateY(-50%); }
 .caption-preview-line { display: block; width: fit-content; max-width: 100%; margin: 0 auto; }
@@ -705,7 +702,6 @@ a { color: var(--amber); }
     var(--caption-outline, .55cqw) var(--caption-outline, .55cqw) 0 #000,
     0 var(--caption-shadow, .14cqw) var(--caption-shadow, .14cqw) rgba(0,0,0,.85);
 }
-.caption-preview[data-style="bold"] { font-family: var(--font-display); letter-spacing: .015em; }
 .caption-preview[data-style="clean"] {
   font-weight: 600;
   line-height: 1.25;
@@ -785,16 +781,6 @@ a { color: var(--amber); }
 }
 .smart-reframe-metrics b { color: var(--bone); font: 10px var(--font-mono); font-weight: 500; }
 .smart-reframe-info p { margin: 8px 0 0; color: var(--fog-dim); font-size: 9px; line-height: 1.4; }
-.facecam-corner-label {
-  display: block;
-  margin: 11px 0 6px;
-  color: var(--fog-dim);
-  font: 9px var(--font-mono);
-  text-transform: uppercase;
-  letter-spacing: .5px;
-}
-.facecam-corners { grid-template-columns: 1.35fr repeat(4, 1fr); }
-.facecam-corners button { font-family: var(--font-mono); }
 @keyframes smartPulse { 50% { opacity: .35; transform: scale(.75); } }
 .caption-layout-hint { padding-top: 9px; border-top: 1px solid var(--line); }
 .control-block > label { margin-bottom: 9px; }
