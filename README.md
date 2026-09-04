@@ -13,7 +13,7 @@ job-scoped local filesystem for media.
 - Supabase PostgreSQL for jobs, clips, and artifact metadata
 - Optional Supabase access-token validation
 - Local media storage with automatic retention cleanup
-- Plain HTML, CSS, and JavaScript frontend
+- React, TypeScript, Vite, and Motion frontend
 
 ## Creative controls and clip studio
 
@@ -29,6 +29,11 @@ job-scoped local filesystem for media.
   tracks, mouth-motion evidence, scene-cut recovery, natural headroom, and a
   speed-limited FFmpeg crop path. The Studio previews this planned path and
   reports its confidence; Manual remains a precise override.
+- Gaming/OBS mode detects a small, stable corner facecam and produces a true
+  Gameplay + Reaction portrait composition: 65% gameplay, 35% enlarged
+  reaction, a protected caption boundary, and manual corner correction.
+- Bold exports use the bundled open-source Bebas Neue font, so typography is
+  consistent across developer and production machines.
 - Users can request 3, 5, or 8 clips and choose quick, balanced, or deep
   duration ranges.
 - Highlight candidates are ranked for hook, prompt relevance, completeness,
@@ -86,7 +91,8 @@ Run the frontend in another terminal:
 
 ```bash
 cd clipmaker-frontend
-python3 -m http.server 5500
+npm install
+npm run dev
 ```
 
 Open <http://localhost:5500>. API documentation is available at

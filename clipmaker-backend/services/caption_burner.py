@@ -10,7 +10,7 @@ from services.render_settings import CaptionPosition, CaptionSize, CaptionStyle
 
 STYLE_PRESETS = {
     CaptionStyle.BOLD: {
-        "font": "Arial",
+        "font": "Bebas Neue",
         "primary": "&H00FFFFFF",
         "secondary": "&H00FFFFFF",
         "outline": "&H00000000",
@@ -198,8 +198,14 @@ def build_ass_file(
         CaptionPosition.TOP: 8,
         CaptionPosition.CENTER: 5,
         CaptionPosition.BOTTOM: 2,
+        CaptionPosition.GAMING: 2,
     }[position]
-    if position == CaptionPosition.BOTTOM:
+    if position == CaptionPosition.GAMING:
+        # The gameplay/reaction split is at 65% of a portrait canvas. ASS
+        # bottom alignment measures upward from the bottom, so this places the
+        # caption just above that boundary without covering HUD information.
+        margin_v = round(frame_height * 0.34)
+    elif position == CaptionPosition.BOTTOM:
         # ASS anchors MarginV at the font baseline, so the visible glyph box
         # sits roughly another font-height above it. A small baseline margin
         # visually matches the browser's 8%/6% bottom box offset.

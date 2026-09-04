@@ -5,11 +5,9 @@ local `storage/jobs` directory.
 
 1. Open your Supabase project.
 2. Open **SQL Editor**.
-3. Run `supabase/migrations/001_phase1_storage.sql`.
-   - If you already ran Phase 1 before the creative controls were added, also
-     run `supabase/migrations/002_clip_preferences.sql`.
-   - For Phase 2 clip count and duration controls, also run
-     `supabase/migrations/003_highlight_preferences.sql`.
+3. Run every SQL file in `supabase/migrations/` in numeric order. Existing
+   projects can run only the migrations they have not applied yet; migration
+   006 adds Gaming/OBS content and Gameplay + Reaction layout fields.
 4. Open **Project Settings > API**.
 5. Copy `.env.example` to `.env`.
 6. Set `SUPABASE_URL` and `SUPABASE_SECRET_KEY` in `.env`.

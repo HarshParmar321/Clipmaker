@@ -14,7 +14,17 @@ from services.face_tracker import (
     slice_focus_points,
     track_subject,
 )
-from services.render_settings import OutputFormat, ReframeMode, TARGET_DIMENSIONS
+from services.gaming_layout import FacecamRegion, detect_facecam_region
+from services.render_settings import (
+    FacecamCorner,
+    LayoutMode,
+    OutputFormat,
+    ReframeMode,
+    TARGET_DIMENSIONS,
+)
+
+
+FONTS_DIR = Path(__file__).resolve().parent.parent / "fonts"
 
 
 @dataclass(frozen=True)
@@ -111,9 +121,63 @@ def _video_filter(
             f"crop={width}:{height}:x='{x_expression}':y='{y_expression}',setsar=1"
         )
     if ass_path:
-        escaped_ass = str(ass_path).replace("\\", "\\\\").replace(":", "\\:")
-        filters.append(f"ass={escaped_ass}")
+        filters.append(_ass_filter(ass_path))
     return ",".join(filters) if filters else None
+
+
+def _escape_filter_path(path: Path) -> str:
+    return str(path).replace("\\", "\\\\").replace(":", "\\:").replace("'", "\\'")
+
+
+def _ass_filter(ass_path: Path) -> str:
+    value = f"ass={_escape_filter_path(ass_path)}"
+    if FONTS_DIR.is_dir():
+        value += f":fontsdir={_escape_filter_path(FONTS_DIR)}"
+    return value
+
+
+def build_gaming_filter(
+    facecam_region: FacecamRegion,
+    *,
+    crop_x: float = 0.5,
+    crop_y: float = 0.5,
+    crop_keyframes: list[CropKeyframe] | None = None,
+    ass_path: Path | None = None,
+) -> str:
+    """Build the 9:16 Gameplay + Reaction filter graph.
+
+    Gameplay owns the upper 65% of the output. The OBS camera is enlarged into
+    the lower 35%, and a dark divider protects captions placed at the boundary.
+    """
+    width, height = TARGET_DIMENSIONS[OutputFormat.VERTICAL]
+    gameplay_height = round(height * 0.65 / 2) * 2
+    reaction_height = height - gameplay_height
+    keyframes = crop_keyframes or []
+    x_expression = build_keyframe_expression(keyframes, "x", crop_x, "iw", "ow")
+    y_expression = build_keyframe_expression(keyframes, "y", crop_y, "ih", "oh")
+    region = FacecamRegion(
+        max(0.0, min(facecam_region.x, 0.98)),
+        max(0.0, min(facecam_region.y, 0.98)),
+        max(0.02, min(facecam_region.width, 1.0 - facecam_region.x)),
+        max(0.02, min(facecam_region.height, 1.0 - facecam_region.y)),
+    )
+    graph = (
+        "[0:v]setpts=PTS-STARTPTS,split=2[game_src][reaction_src];"
+        f"[game_src]scale={width}:{gameplay_height}:force_original_aspect_ratio=increase,"
+        f"crop={width}:{gameplay_height}:x='{x_expression}':y='{y_expression}',"
+        "setsar=1[game];"
+        "[reaction_src]"
+        f"crop=w='floor(iw*{region.width:.6f}/2)*2':"
+        f"h='floor(ih*{region.height:.6f}/2)*2':"
+        f"x='iw*{region.x:.6f}':y='ih*{region.y:.6f}',"
+        f"scale={width}:{reaction_height}:force_original_aspect_ratio=increase,"
+        f"crop={width}:{reaction_height},setsar=1[reaction];"
+        f"[game][reaction]vstack=inputs=2,"
+        f"drawbox=x=0:y={gameplay_height - 4}:w={width}:h=8:color=black@0.88:t=fill"
+    )
+    if ass_path:
+        graph += f",{_ass_filter(ass_path)}"
+    return graph + "[vout]"
 
 
 def build_crop_expression(
@@ -191,6 +255,9 @@ def _render(
     reframe_mode: ReframeMode,
     smart_analysis: ReframeAnalysis | None = None,
     smart_analysis_offset: float = 0.0,
+    layout_mode: LayoutMode = LayoutMode.SMART,
+    facecam_region: FacecamRegion | None = None,
+    facecam_corner: FacecamCorner = FacecamCorner.AUTO,
 ) -> Path:
     out_path.parent.mkdir(parents=True, exist_ok=True)
     duration = max(end - start, 0.5)
@@ -204,9 +271,18 @@ def _render(
         "-t",
         str(duration),
     ]
+    layout_mode = LayoutMode(layout_mode)
+    gaming_layout = (
+        OutputFormat(output_format) == OutputFormat.VERTICAL
+        and layout_mode == LayoutMode.GAMEPLAY_REACTION
+    )
     focus_points: list[FocusPoint] = []
     smart_zoom = crop_zoom
-    if OutputFormat(output_format) == OutputFormat.VERTICAL and ReframeMode(reframe_mode) == ReframeMode.AUTO:
+    if (
+        not gaming_layout
+        and OutputFormat(output_format) == OutputFormat.VERTICAL
+        and ReframeMode(reframe_mode) == ReframeMode.AUTO
+    ):
         analysis = smart_analysis or track_subject(source_path, start, end)
         focus_points = (
             slice_focus_points(
@@ -218,17 +294,32 @@ def _render(
             else analysis.points
         )
         smart_zoom = analysis.zoom
-    video_filter = _video_filter(
-        output_format,
-        crop_x,
-        crop_y,
-        smart_zoom,
-        ass_path,
-        focus_points,
-        crop_keyframes if ReframeMode(reframe_mode) == ReframeMode.MANUAL else [],
-    )
-    if video_filter:
-        args.extend(["-vf", video_filter])
+    if gaming_layout:
+        region = facecam_region or detect_facecam_region(
+            source_path, start, end, facecam_corner
+        ).region
+        video_filter = build_gaming_filter(
+            region,
+            crop_x=crop_x,
+            crop_y=crop_y,
+            crop_keyframes=(
+                crop_keyframes if ReframeMode(reframe_mode) == ReframeMode.MANUAL else []
+            ),
+            ass_path=ass_path,
+        )
+        args.extend(["-filter_complex", video_filter, "-map", "[vout]", "-map", "0:a?"])
+    else:
+        video_filter = _video_filter(
+            output_format,
+            crop_x,
+            crop_y,
+            smart_zoom,
+            ass_path,
+            focus_points,
+            crop_keyframes if ReframeMode(reframe_mode) == ReframeMode.MANUAL else [],
+        )
+        if video_filter:
+            args.extend(["-vf", video_filter])
     args.extend(
         [
             "-c:v",
@@ -265,6 +356,9 @@ def cut_clip(
     reframe_mode: ReframeMode = ReframeMode.AUTO,
     smart_analysis: ReframeAnalysis | None = None,
     smart_analysis_offset: float = 0.0,
+    layout_mode: LayoutMode = LayoutMode.SMART,
+    facecam_region: FacecamRegion | None = None,
+    facecam_corner: FacecamCorner = FacecamCorner.AUTO,
 ) -> Path:
     return _render(
         source_path,
@@ -280,6 +374,9 @@ def cut_clip(
         reframe_mode=reframe_mode,
         smart_analysis=smart_analysis,
         smart_analysis_offset=smart_analysis_offset,
+        layout_mode=layout_mode,
+        facecam_region=facecam_region,
+        facecam_corner=facecam_corner,
     )
 
 
@@ -297,6 +394,9 @@ def cut_and_caption(
     reframe_mode: ReframeMode = ReframeMode.AUTO,
     smart_analysis: ReframeAnalysis | None = None,
     smart_analysis_offset: float = 0.0,
+    layout_mode: LayoutMode = LayoutMode.SMART,
+    facecam_region: FacecamRegion | None = None,
+    facecam_corner: FacecamCorner = FacecamCorner.AUTO,
 ) -> Path:
     return _render(
         source_path,
@@ -312,6 +412,9 @@ def cut_and_caption(
         reframe_mode=reframe_mode,
         smart_analysis=smart_analysis,
         smart_analysis_offset=smart_analysis_offset,
+        layout_mode=layout_mode,
+        facecam_region=facecam_region,
+        facecam_corner=facecam_corner,
     )
 
 

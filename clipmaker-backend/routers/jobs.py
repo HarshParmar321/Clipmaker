@@ -21,6 +21,7 @@ from services import caption_burner, video_cutter
 from services.auth import AuthenticatedUser, current_user
 from services.exceptions import VideoDownloadError
 from services.face_tracker import track_subject
+from services.gaming_layout import FacecamRegion, detect_facecam_region
 from services.job_store import (
     ACTIVE_JOB_STATUSES,
     ArtifactKind,
@@ -44,12 +45,16 @@ from services.render_settings import (
     CaptionPosition,
     CaptionSize,
     CaptionStyle,
+    ContentMode,
+    FacecamCorner,
+    LayoutMode,
     OutputFormat,
     ReframeMode,
 )
 
 router = APIRouter(prefix="/api/jobs", tags=["jobs"])
 MEDIA_CHUNK_BYTES = 1024 * 1024
+RECOVERABLE_SAVED_STAGES = {JobStatus.DETECTING_HIGHLIGHTS.value}
 
 
 class CreateJobFromUrl(BaseModel):
@@ -57,6 +62,7 @@ class CreateJobFromUrl(BaseModel):
     creative_prompt: str | None = Field(default=None, max_length=1000)
     output_format: OutputFormat = OutputFormat.VERTICAL
     caption_style: CaptionStyle = CaptionStyle.BOLD
+    content_mode: ContentMode = ContentMode.GENERAL
     target_clip_count: int = Field(default=5, ge=1, le=10)
     min_clip_duration: int = Field(default=20, ge=5, le=90)
     max_clip_duration: int = Field(default=60, ge=10, le=120)
@@ -111,6 +117,19 @@ class ReframeKeyframe(BaseModel):
     y: float = Field(default=0.5, ge=0, le=1)
 
 
+class FacecamRegionPayload(BaseModel):
+    x: float = Field(ge=0, le=1)
+    y: float = Field(ge=0, le=1)
+    width: float = Field(gt=0.02, le=1)
+    height: float = Field(gt=0.02, le=1)
+
+    @model_validator(mode="after")
+    def stays_inside_source(self):
+        if self.x + self.width > 1.001 or self.y + self.height > 1.001:
+            raise ValueError("Facecam crop must stay inside the source video")
+        return self
+
+
 class RenderClipRequest(BaseModel):
     start: float
     end: float
@@ -126,6 +145,9 @@ class RenderClipRequest(BaseModel):
     crop_zoom: float = Field(default=1.0, ge=1, le=3)
     crop_keyframes: list[ReframeKeyframe] = Field(default_factory=list, max_length=120)
     reframe_mode: ReframeMode = ReframeMode.AUTO
+    layout_mode: LayoutMode = LayoutMode.SMART
+    facecam_corner: FacecamCorner = FacecamCorner.AUTO
+    facecam_region: FacecamRegionPayload | None = None
 
     @model_validator(mode="after")
     def valid_caption_timeline(self):
@@ -254,6 +276,7 @@ def _serialize_clip(job: Job, clip) -> dict:
     data["thumbnails_url"] = f"/api/jobs/{job.id}/clips/{clip.id}/thumbnails"
     data["editor_preview_url"] = f"/api/jobs/{job.id}/clips/{clip.id}/editor-preview"
     data["reframe_analysis_url"] = f"/api/jobs/{job.id}/clips/{clip.id}/reframe-analysis"
+    data["gaming_analysis_url"] = f"/api/jobs/{job.id}/clips/{clip.id}/gaming-analysis"
     data["render_url"] = f"/api/jobs/{job.id}/clips/{clip.id}/render"
     return data
 
@@ -271,6 +294,17 @@ def _serialize_progress(job: Job) -> dict:
         "cancel_requested_at": job.cancel_requested_at,
         "created_at": job.created_at,
     }
+
+
+def _can_retry_job(job: Job) -> bool:
+    return (
+        job.status in {JobStatus.FAILED, JobStatus.CANCELLED}
+        and (
+            job.retryable
+            or job.failed_stage is None
+            or job.failed_stage in RECOVERABLE_SAVED_STAGES
+        )
+    )
 
 
 def _editor_preview_id(clip_id: str) -> str:
@@ -299,6 +333,7 @@ def create_job_from_url(
         payload.target_clip_count,
         payload.min_clip_duration,
         payload.max_clip_duration,
+        payload.content_mode,
     )
     background_tasks.add_task(run_pipeline, job)
     return {"job_id": job.id, "status": job.status}
@@ -311,6 +346,7 @@ def create_job_from_upload(
     creative_prompt: str | None = Form(default=None, max_length=1000),
     output_format: OutputFormat = Form(default=OutputFormat.VERTICAL),
     caption_style: CaptionStyle = Form(default=CaptionStyle.BOLD),
+    content_mode: ContentMode = Form(default=ContentMode.GENERAL),
     target_clip_count: int = Form(default=5, ge=1, le=10),
     min_clip_duration: int = Form(default=20, ge=5, le=90),
     max_clip_duration: int = Form(default=60, ge=10, le=120),
@@ -331,6 +367,7 @@ def create_job_from_upload(
         target_clip_count,
         min_clip_duration,
         max_clip_duration,
+        content_mode,
     )
     try:
         source_path, size_bytes = media_storage.save_upload(job.id, file.filename, file.file)
@@ -373,14 +410,12 @@ def get_job_status(
         "error": job.error,
         "progress": _serialize_progress(job),
         "can_cancel": job.status in ACTIVE_JOB_STATUSES and not job.cancel_requested_at,
-        "can_retry": (
-            job.status in {JobStatus.FAILED, JobStatus.CANCELLED}
-            and (job.retryable or job.failed_stage is None)
-        ),
+        "can_retry": _can_retry_job(job),
         "settings": {
             "creative_prompt": job.creative_prompt,
             "output_format": job.output_format,
             "caption_style": job.caption_style,
+            "content_mode": job.content_mode,
             "target_clip_count": job.target_clip_count,
             "min_clip_duration": job.min_clip_duration,
             "max_clip_duration": job.max_clip_duration,
@@ -418,7 +453,7 @@ def retry_job(
     job = _get_accessible_job(job_id, user)
     if job.status not in {JobStatus.FAILED, JobStatus.CANCELLED}:
         raise HTTPException(status_code=409, detail="Only a failed or cancelled job can be retried")
-    if not job.retryable and job.failed_stage is not None:
+    if not _can_retry_job(job):
         raise HTTPException(
             status_code=409,
             detail=job.error or "This failure needs new input instead of a retry",
@@ -620,6 +655,41 @@ def get_reframe_analysis(
     }
 
 
+@router.get("/{job_id}/clips/{clip_id}/gaming-analysis")
+def get_gaming_analysis(
+    job_id: str,
+    clip_id: str,
+    corner: FacecamCorner = FacecamCorner.AUTO,
+    user: AuthenticatedUser | None = Depends(current_user),
+):
+    """Locate the stable corner facecam used by Gameplay + Reaction exports."""
+    job = _get_accessible_job(job_id, user)
+    clip = next((item for item in job.clips if item.id == clip_id), None)
+    if not clip:
+        raise HTTPException(status_code=404, detail="Clip not found")
+    if not job.video_path or not Path(job.video_path).exists():
+        raise HTTPException(status_code=410, detail="Original source video has expired")
+    analysis = detect_facecam_region(Path(job.video_path), clip.start, clip.end, corner)
+    return {
+        "region": {
+            "x": round(analysis.region.x, 5),
+            "y": round(analysis.region.y, 5),
+            "width": round(analysis.region.width, 5),
+            "height": round(analysis.region.height, 5),
+        },
+        "confidence": round(analysis.confidence, 3),
+        "detection_ratio": round(analysis.detection_ratio, 3),
+        "detector": analysis.detector,
+        "corner": analysis.corner,
+        "used_fallback": analysis.used_fallback,
+        "message": (
+            "OBS facecam detected. Choose another corner if the preview is wrong."
+            if not analysis.used_fallback
+            else "No stable facecam was detected, so the selected corner is being used."
+        ),
+    }
+
+
 @router.post("/{job_id}/clips/{clip_id}/render")
 def render_clip(
     job_id: str,
@@ -645,13 +715,34 @@ def render_clip(
     ass_path = media_storage.subtitle_path(job.id, render_id)
     subtitle_artifact_id: str | None = None
     smart_analysis = None
+    gaming_analysis = None
+    gaming_layout = (
+        payload.output_format == OutputFormat.VERTICAL
+        and payload.layout_mode == LayoutMode.GAMEPLAY_REACTION
+    )
     if (
+        not gaming_layout
+        and
         payload.output_format == OutputFormat.VERTICAL
         and payload.reframe_mode == ReframeMode.AUTO
     ):
         # Analyse the whole suggested clip once. Trimmed renders slice this
         # cached path so Studio preview and FFmpeg use identical framing.
         smart_analysis = track_subject(Path(job.video_path), clip.start, clip.end)
+    if gaming_layout and payload.facecam_region is None:
+        gaming_analysis = detect_facecam_region(
+            Path(job.video_path), clip.start, clip.end, payload.facecam_corner
+        )
+    facecam_region = (
+        FacecamRegion(**payload.facecam_region.model_dump())
+        if payload.facecam_region is not None
+        else gaming_analysis.region if gaming_analysis else None
+    )
+    caption_position = (
+        CaptionPosition.GAMING
+        if gaming_layout and payload.caption_position == CaptionPosition.BOTTOM
+        else payload.caption_position
+    )
     try:
         if payload.captions and job.transcript:
             subtitle_artifact = register_artifact(
@@ -692,7 +783,7 @@ def render_clip(
                 frame_width=frame_width,
                 frame_height=frame_height,
                 style=payload.caption_style,
-                position=payload.caption_position,
+                position=caption_position,
                 size=payload.caption_size,
             )
             video_cutter.cut_and_caption(
@@ -712,6 +803,9 @@ def render_clip(
                 reframe_mode=payload.reframe_mode,
                 smart_analysis=smart_analysis,
                 smart_analysis_offset=payload.start,
+                layout_mode=payload.layout_mode,
+                facecam_region=facecam_region,
+                facecam_corner=payload.facecam_corner,
             )
         else:
             video_cutter.cut_clip(
@@ -730,6 +824,9 @@ def render_clip(
                 reframe_mode=payload.reframe_mode,
                 smart_analysis=smart_analysis,
                 smart_analysis_offset=payload.start,
+                layout_mode=payload.layout_mode,
+                facecam_region=facecam_region,
+                facecam_corner=payload.facecam_corner,
             )
     except VideoDownloadError as exc:
         raise HTTPException(status_code=500, detail=exc.user_message) from exc
@@ -755,7 +852,9 @@ def render_clip(
         "output_format": payload.output_format,
         "caption_style": payload.caption_style,
         "caption_size": payload.caption_size,
+        "caption_position": caption_position,
         "reframe_mode": payload.reframe_mode,
+        "layout_mode": payload.layout_mode,
         "crop_zoom": payload.crop_zoom,
         "crop_keyframes": len(payload.crop_keyframes),
         "smart_reframe": (
@@ -766,6 +865,15 @@ def render_clip(
                 "subject_switches": smart_analysis.subject_switches,
             }
             if smart_analysis
+            else None
+        ),
+        "gaming_reframe": (
+            {
+                "corner": gaming_analysis.corner,
+                "confidence": round(gaming_analysis.confidence, 3),
+                "used_fallback": gaming_analysis.used_fallback,
+            }
+            if gaming_analysis
             else None
         ),
     }

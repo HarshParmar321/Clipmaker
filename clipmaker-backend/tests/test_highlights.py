@@ -3,7 +3,7 @@ from types import SimpleNamespace
 from unittest.mock import patch
 
 from services.exceptions import VideoDownloadError
-from services.highlight_detector import detect_highlights, validate_highlights
+from services.highlight_detector import detect_highlights, recover_highlights, validate_highlights
 
 
 class HighlightValidationTests(unittest.TestCase):
@@ -272,6 +272,62 @@ class HighlightValidationTests(unittest.TestCase):
             ),
             [],
         )
+
+    def test_recovery_uses_relaxed_natural_pause_after_strict_rejection(self):
+        words = [
+            {"word": "This", "start": 0, "end": 2},
+            {"word": "moment", "start": 2, "end": 4},
+            {"word": "has", "start": 4, "end": 6},
+            {"word": "a", "start": 6, "end": 8},
+            {"word": "natural", "start": 8, "end": 10},
+            {"word": "pause", "start": 10, "end": 12},
+            {"word": "and", "start": 12.4, "end": 14},
+            {"word": "finishes", "start": 14, "end": 17},
+            {"word": "cleanly", "start": 17, "end": 20},
+        ]
+        raw = [{
+            "title": "Useful recovery",
+            "start": 1,
+            "end": 17,
+            "hook_score": 82,
+            "relevance_score": 84,
+            "completeness_score": 55,
+            "shareability_score": 78,
+        }]
+        recovered = recover_highlights(
+            raw,
+            video_duration=22,
+            words=words,
+            target_clip_count=1,
+            min_clip_duration=10,
+            max_clip_duration=18,
+        )
+        self.assertEqual(len(recovered), 1)
+        self.assertEqual(recovered[0]["start"], 0)
+        self.assertEqual(recovered[0]["end"], 20)
+        self.assertLessEqual(recovered[0]["score"], 79)
+
+    def test_recovery_builds_transcript_window_when_model_returns_none(self):
+        words = [
+            {"word": "A", "start": 0, "end": 1},
+            {"word": "complete", "start": 1, "end": 4},
+            {"word": "opening.", "start": 4, "end": 8},
+            {"word": "Another", "start": 8.4, "end": 11},
+            {"word": "useful", "start": 11, "end": 14},
+            {"word": "thought.", "start": 14, "end": 18},
+        ]
+        recovered = recover_highlights(
+            [],
+            video_duration=20,
+            words=words,
+            target_clip_count=1,
+            min_clip_duration=6,
+            max_clip_duration=12,
+        )
+        self.assertEqual(len(recovered), 1)
+        self.assertIn(recovered[0]["start"], {0, 8.4})
+        self.assertGreaterEqual(recovered[0]["end"] - recovered[0]["start"], 6)
+        self.assertTrue(recovered[0]["title"])
 
 
 if __name__ == "__main__":

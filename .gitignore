@@ -9,6 +9,9 @@ __pycache__/
 .coverage
 htmlcov/
 storage/
+node_modules/
+dist/
+*.tsbuildinfo
 *.mp4
 *.mp3
 *.ass

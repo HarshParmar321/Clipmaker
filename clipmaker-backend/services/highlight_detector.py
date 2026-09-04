@@ -416,3 +416,168 @@ def validate_highlights(
     for candidate in selected:
         candidate.pop("_topic_tokens", None)
     return sorted(selected, key=lambda item: item["start"])
+
+
+def _relaxed_spoken_window(
+    requested_start: float,
+    requested_end: float,
+    words: list[dict],
+    min_duration: float,
+    max_duration: float,
+    video_duration: float,
+) -> tuple[float, float] | None:
+    """Find an editable word-safe window when strict sentence snapping fails.
+
+    The primary validator remains deliberately strict. This recovery path is
+    only used after it returns no clips, and prefers punctuation or shorter
+    natural pauses while allowing a little more time to finish the thought.
+    """
+    if not words:
+        return None
+    boundary_indexes = [
+        index
+        for index, word in enumerate(words)
+        if _ends_sentence(word) or _pause_after(words, index, seconds=0.3)
+    ]
+    start_indexes = [0, *[index + 1 for index in boundary_indexes if index + 1 < len(words)]]
+    nearby_starts = [
+        index
+        for index in start_indexes
+        if abs(float(words[index]["start"]) - requested_start) <= 14
+    ]
+    start_index = min(
+        nearby_starts or start_indexes,
+        key=lambda index: abs(float(words[index]["start"]) - requested_start),
+    )
+    start = max(0.0, float(words[start_index]["start"]))
+    maximum_end = min(start + max_duration + 8.0, video_duration)
+    valid_ends = [
+        index
+        for index in boundary_indexes
+        if start + min_duration <= float(words[index]["end"]) <= maximum_end
+    ]
+    if not valid_ends:
+        return None
+    end_index = min(
+        valid_ends,
+        key=lambda index: (
+            float(words[index]["end"]) < requested_end - 0.2,
+            abs(float(words[index]["end"]) - requested_end),
+        ),
+    )
+    return round(start, 3), round(min(float(words[end_index]["end"]), video_duration), 3)
+
+
+def _fallback_title(words: list[dict], start: float, end: float) -> str:
+    spoken = [
+        _word_text(word).strip(".,!?…:;\"'")
+        for word in words
+        if float(word["end"]) > start and float(word["start"]) < end
+    ]
+    title = " ".join(word for word in spoken[:7] if word).strip()
+    return (title[:58].rstrip() or "Strong spoken moment").capitalize()
+
+
+def recover_highlights(
+    raw_clips: list[dict],
+    video_duration: float,
+    words: list[dict],
+    *,
+    target_clip_count: int = 5,
+    min_clip_duration: float = 20,
+    max_clip_duration: float = 60,
+) -> list[dict]:
+    """Return conservative editable clips after the strict pass yields zero.
+
+    Model timestamps are preferred. If the model returned no candidates, the
+    transcript is divided at natural boundaries and ranked with lightweight
+    signals. Recovered scores are intentionally capped so they are never
+    presented as premium AI picks.
+    """
+    if not words or video_duration <= 0:
+        return []
+    target_clip_count = max(1, min(int(target_clip_count), 10))
+    minimum = max(5.0, float(min_clip_duration))
+    maximum = max(minimum + 1.0, min(120.0, float(max_clip_duration)))
+
+    proposals: list[tuple[float, float, dict | None]] = []
+    for raw in raw_clips[:30]:
+        try:
+            requested_start = float(raw["start"])
+            requested_end = float(raw["end"])
+        except (KeyError, TypeError, ValueError):
+            continue
+        if requested_end <= requested_start:
+            continue
+        window = _relaxed_spoken_window(
+            requested_start,
+            requested_end,
+            words,
+            minimum,
+            maximum,
+            video_duration,
+        )
+        if window:
+            proposals.append((*window, raw))
+
+    if not proposals:
+        boundary_indexes = [
+            index
+            for index, word in enumerate(words)
+            if _ends_sentence(word) or _pause_after(words, index, seconds=0.3)
+        ]
+        start_indexes = [0, *[index + 1 for index in boundary_indexes if index + 1 < len(words)]]
+        target_duration = min(maximum, max(minimum, (minimum + maximum) / 2))
+        for start_index in start_indexes:
+            start = float(words[start_index]["start"])
+            valid_ends = [
+                index
+                for index in boundary_indexes
+                if start + minimum <= float(words[index]["end"]) <= min(start + maximum + 8, video_duration)
+            ]
+            if not valid_ends:
+                continue
+            end_index = min(
+                valid_ends,
+                key=lambda index: abs(float(words[index]["end"]) - start - target_duration),
+            )
+            proposals.append((start, float(words[end_index]["end"]), None))
+
+    candidates: list[dict] = []
+    for start, end, raw in proposals:
+        if end <= start:
+            continue
+        text = _candidate_text(words, start, end)
+        tokens = _normalized_tokens(text)
+        raw_score = _quality_score(raw or {})
+        richness = min(len(tokens) // 3, 10)
+        score = min(79, max(58 + richness, min(raw_score, 79)))
+        title = str((raw or {}).get("title") or _fallback_title(words, start, end))[:120]
+        reason = str((raw or {}).get("reason") or "A complete spoken passage selected as an editable starting point.")[:500]
+        candidates.append({
+            "title": title,
+            "start": round(start, 3),
+            "end": round(end, 3),
+            "score": score,
+            "score_breakdown": _score_breakdown(raw or {}),
+            "reason": reason,
+            "_topic_tokens": _normalized_tokens(f"{title} {text}"),
+        })
+
+    selected: list[dict] = []
+    for candidate in sorted(candidates, key=lambda item: item["score"], reverse=True):
+        overlaps = any(
+            candidate["start"] < existing["end"] and candidate["end"] > existing["start"]
+            for existing in selected
+        )
+        repeats_topic = any(
+            _topic_similarity(candidate["_topic_tokens"], existing["_topic_tokens"]) >= 0.72
+            for existing in selected
+        )
+        if not overlaps and not repeats_topic:
+            selected.append(candidate)
+        if len(selected) == target_clip_count:
+            break
+    for candidate in selected:
+        candidate.pop("_topic_tokens", None)
+    return sorted(selected, key=lambda item: item["start"])

@@ -18,7 +18,7 @@ from typing import Optional, Protocol
 from pydantic import BaseModel, Field, model_validator
 
 from config import SUPABASE_CONFIGURED, SUPABASE_SERVER_KEY, SUPABASE_URL
-from services.render_settings import CaptionStyle, OutputFormat
+from services.render_settings import CaptionStyle, ContentMode, LayoutMode, OutputFormat
 
 logger = logging.getLogger("clipmaker.job_store")
 
@@ -65,6 +65,7 @@ class Clip(BaseModel):
     file_path: Optional[str] = None
     output_format: OutputFormat = OutputFormat.VERTICAL
     caption_style: CaptionStyle = CaptionStyle.BOLD
+    layout_mode: LayoutMode = LayoutMode.SMART
 
 
 class Job(BaseModel):
@@ -80,6 +81,7 @@ class Job(BaseModel):
     creative_prompt: Optional[str] = None
     output_format: OutputFormat = OutputFormat.VERTICAL
     caption_style: CaptionStyle = CaptionStyle.BOLD
+    content_mode: ContentMode = ContentMode.GENERAL
     target_clip_count: int = Field(default=5, ge=1, le=10)
     min_clip_duration: int = Field(default=20, ge=5, le=90)
     max_clip_duration: int = Field(default=60, ge=10, le=120)
@@ -124,6 +126,7 @@ class JobRepository(Protocol):
         target_clip_count: int,
         min_clip_duration: int,
         max_clip_duration: int,
+        content_mode: ContentMode = ContentMode.GENERAL,
     ) -> Job: ...
     def get_job(self, job_id: str) -> Job | None: ...
     def update_job(self, job: Job) -> None: ...
@@ -152,6 +155,7 @@ class MemoryJobRepository:
         target_clip_count: int,
         min_clip_duration: int,
         max_clip_duration: int,
+        content_mode: ContentMode = ContentMode.GENERAL,
     ) -> Job:
         job = Job(
             source_type=source_type,
@@ -163,6 +167,7 @@ class MemoryJobRepository:
             target_clip_count=target_clip_count,
             min_clip_duration=min_clip_duration,
             max_clip_duration=max_clip_duration,
+            content_mode=content_mode,
         )
         with self._lock:
             self.jobs[job.id] = job.model_copy(deep=True)
@@ -294,6 +299,7 @@ class SupabaseJobRepository:
         job: Job,
         include_quality_preferences: bool = True,
         include_reliability: bool = True,
+        include_content_mode: bool = True,
     ) -> dict:
         row = {
             "id": job.id,
@@ -308,6 +314,8 @@ class SupabaseJobRepository:
             "output_format": job.output_format.value,
             "caption_style": job.caption_style.value,
         }
+        if include_content_mode:
+            row["content_mode"] = job.content_mode.value
         if include_quality_preferences:
             row.update(
                 {
@@ -350,6 +358,18 @@ class SupabaseJobRepository:
                 description,
             )
         except APIError as exc:
+            if "content_mode" in str(exc):
+                logger.warning(
+                    "Supabase migration 006 is not applied yet; Gaming/OBS mode "
+                    "will only live in this backend process."
+                )
+                self._execute(
+                    lambda client: client.table("jobs")
+                    .upsert(self._job_row(job, include_content_mode=False))
+                    .execute(),
+                    f"{description} without Gaming/OBS mode",
+                )
+                return
             reliability_columns = (
                 "progress_percent",
                 "progress_message",
@@ -395,7 +415,12 @@ class SupabaseJobRepository:
             )
 
     @staticmethod
-    def _clip_row(job_id: str, clip: Clip, include_score_breakdown: bool = True) -> dict:
+    def _clip_row(
+        job_id: str,
+        clip: Clip,
+        include_score_breakdown: bool = True,
+        include_layout_mode: bool = True,
+    ) -> dict:
         row = {
             "id": clip.id,
             "job_id": job_id,
@@ -410,6 +435,8 @@ class SupabaseJobRepository:
         }
         if include_score_breakdown:
             row["score_breakdown"] = clip.score_breakdown
+        if include_layout_mode:
+            row["layout_mode"] = clip.layout_mode.value
         return row
 
     def create_job(
@@ -423,6 +450,7 @@ class SupabaseJobRepository:
         target_clip_count: int,
         min_clip_duration: int,
         max_clip_duration: int,
+        content_mode: ContentMode = ContentMode.GENERAL,
     ) -> Job:
         job = Job(
             source_type=source_type,
@@ -434,6 +462,7 @@ class SupabaseJobRepository:
             target_clip_count=target_clip_count,
             min_clip_duration=min_clip_duration,
             max_clip_duration=max_clip_duration,
+            content_mode=content_mode,
         )
         self._save_job(job, "job creation")
         return job
@@ -470,6 +499,7 @@ class SupabaseJobRepository:
                 file_path=clip.get("file_path"),
                 output_format=clip.get("output_format") or OutputFormat.VERTICAL,
                 caption_style=clip.get("caption_style") or CaptionStyle.BOLD,
+                layout_mode=clip.get("layout_mode") or LayoutMode.SMART,
             )
             for clip in clips_response.data
         ]
@@ -486,6 +516,7 @@ class SupabaseJobRepository:
             creative_prompt=row.get("creative_prompt"),
             output_format=row.get("output_format") or OutputFormat.VERTICAL,
             caption_style=row.get("caption_style") or CaptionStyle.BOLD,
+            content_mode=row.get("content_mode") or ContentMode.GENERAL,
             target_clip_count=row.get("target_clip_count") or 5,
             min_clip_duration=row.get("min_clip_duration") or 20,
             max_clip_duration=row.get("max_clip_duration") or 60,
@@ -513,6 +544,20 @@ class SupabaseJobRepository:
                     "clip update",
                 )
             except APIError as exc:
+                if "layout_mode" in str(exc):
+                    logger.warning(
+                        "Supabase migration 006 is not applied yet; clip layout mode "
+                        "will not be persisted."
+                    )
+                    fallback_rows = [
+                        self._clip_row(job.id, clip, include_layout_mode=False)
+                        for clip in job.clips
+                    ]
+                    self._execute(
+                        lambda client: client.table("clips").upsert(fallback_rows).execute(),
+                        "clip update without Gaming/OBS layout",
+                    )
+                    return
                 if "score_breakdown" not in str(exc):
                     raise
                 logger.warning(
@@ -662,6 +707,7 @@ def create_job(
     target_clip_count: int = 5,
     min_clip_duration: int = 20,
     max_clip_duration: int = 60,
+    content_mode: ContentMode = ContentMode.GENERAL,
 ) -> Job:
     return repository.create_job(
         source_type,
@@ -673,6 +719,7 @@ def create_job(
         target_clip_count,
         min_clip_duration,
         max_clip_duration,
+        content_mode,
     )
 
 

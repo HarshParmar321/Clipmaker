@@ -19,6 +19,7 @@ class CaptionPosition(str, Enum):
     TOP = "top"
     CENTER = "center"
     BOTTOM = "bottom"
+    GAMING = "gaming"
 
 
 class CaptionSize(str, Enum):
@@ -30,6 +31,24 @@ class CaptionSize(str, Enum):
 class ReframeMode(str, Enum):
     AUTO = "auto"
     MANUAL = "manual"
+
+
+class ContentMode(str, Enum):
+    GENERAL = "general"
+    GAMING = "gaming"
+
+
+class LayoutMode(str, Enum):
+    SMART = "smart"
+    GAMEPLAY_REACTION = "gameplay_reaction"
+
+
+class FacecamCorner(str, Enum):
+    AUTO = "auto"
+    TOP_LEFT = "top_left"
+    TOP_RIGHT = "top_right"
+    BOTTOM_LEFT = "bottom_left"
+    BOTTOM_RIGHT = "bottom_right"
 
 
 TARGET_DIMENSIONS: dict[OutputFormat, tuple[int, int]] = {

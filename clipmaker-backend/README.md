@@ -15,6 +15,7 @@ highlight segments, cutting clips, and burning word-timed captions.
 Apply the SQL files in `supabase/migrations/` in numeric order before enabling
 Supabase. Migration 004 persists each clip's quality-score breakdown and
 migration 005 adds progress, cancellation, retry, and restart recovery.
+Migration 006 stores Gaming/OBS content and Gameplay + Reaction clip layouts.
 See [SUPABASE_SETUP.md](SUPABASE_SETUP.md).
 
 ## Run
@@ -49,6 +50,11 @@ the likely speaker, resets tracking on scene cuts, selects conservative zoom,
 adds natural headroom, and limits crop speed. The editor requests
 `GET /api/jobs/{job_id}/clips/{clip_id}/reframe-analysis` to preview the exact
 cached path that export will reuse. No video frames leave the machine.
+
+Gaming/OBS jobs use `GET /api/jobs/{job_id}/clips/{clip_id}/gaming-analysis`
+to find the repeated corner facecam. A 9:16 Gameplay + Reaction export keeps
+gameplay in the upper 65%, enlarges the reaction crop into the lower 35%, and
+uses an explicit corner override when automatic detection is uncertain.
 
 The API accepts Supabase Bearer tokens. Keep `AUTH_REQUIRED=false` until the
 frontend sign-in flow is connected, then change it to `true`.

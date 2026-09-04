@@ -32,10 +32,15 @@ from services.job_store import (
     update_job,
 )
 from services.media_storage import media_storage
-from services.render_settings import CaptionPosition
+from services.render_settings import CaptionPosition, ContentMode, LayoutMode, OutputFormat
 
 logger = logging.getLogger("clipmaker.pipeline")
 T = TypeVar("T")
+GAMING_DEFAULT_BRIEF = (
+    "Find self-contained gaming moments with a clear setup and payoff: clutch plays, "
+    "surprising failures, strong reactions, funny exchanges, or decisive wins. Prefer "
+    "moments understandable without the full stream and never cut the speaker mid-thought."
+)
 
 
 class PipelineCancelled(Exception):
@@ -246,7 +251,11 @@ def run_pipeline(job: Job) -> None:
             job,
             lambda: highlight_detector.detect_highlights(
                 words,
-                job.creative_prompt,
+                job.creative_prompt or (
+                    GAMING_DEFAULT_BRIEF
+                    if job.content_mode == ContentMode.GAMING
+                    else None
+                ),
                 target_clip_count=job.target_clip_count,
                 min_clip_duration=job.min_clip_duration,
                 max_clip_duration=job.max_clip_duration,
@@ -265,9 +274,23 @@ def run_pipeline(job: Job) -> None:
         )
         logger.info("[%s] accepted %d validated highlight(s)", job.id, len(clips))
         if not clips:
+            clips = highlight_detector.recover_highlights(
+                raw_clips,
+                duration,
+                words,
+                target_clip_count=job.target_clip_count,
+                min_clip_duration=job.min_clip_duration,
+                max_clip_duration=job.max_clip_duration,
+            )
+            logger.warning(
+                "[%s] strict validation returned no clips; recovered %d editable candidate(s)",
+                job.id,
+                len(clips),
+            )
+        if not clips:
             raise VideoDownloadError(
-                "No strong, self-contained moments matched these settings. "
-                "Try a different creative direction or clip length.",
+                "This video did not contain enough complete speech for a reliable clip. "
+                "Try a longer video, a broader creative direction, or Gaming mode.",
                 retryable=False,
             )
 
@@ -302,6 +325,12 @@ def run_pipeline(job: Job) -> None:
             final_path = media_storage.output_path(job.id, clip_id)
             subtitle_artifact_id: str | None = None
             progress = 68 + round((processed_clips / total_clips) * 29)
+            layout_mode = (
+                LayoutMode.GAMEPLAY_REACTION
+                if job.content_mode == ContentMode.GAMING
+                and job.output_format == OutputFormat.VERTICAL
+                else LayoutMode.SMART
+            )
 
             try:
                 _checkpoint(
@@ -334,7 +363,11 @@ def run_pipeline(job: Job) -> None:
                     frame_width=frame_width,
                     frame_height=frame_height,
                     style=job.caption_style,
-                    position=CaptionPosition.BOTTOM,
+                    position=(
+                        CaptionPosition.GAMING
+                        if layout_mode == LayoutMode.GAMEPLAY_REACTION
+                        else CaptionPosition.BOTTOM
+                    ),
                 )
                 video_cutter.cut_and_caption(
                     video_path,
@@ -343,6 +376,7 @@ def run_pipeline(job: Job) -> None:
                     end,
                     ass_path,
                     output_format=job.output_format,
+                    layout_mode=layout_mode,
                 )
 
                 job.clips.append(
@@ -357,6 +391,7 @@ def run_pipeline(job: Job) -> None:
                         file_path=str(final_path),
                         output_format=job.output_format,
                         caption_style=job.caption_style,
+                        layout_mode=layout_mode,
                     )
                 )
                 processed_clips += 1

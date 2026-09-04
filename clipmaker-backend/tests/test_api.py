@@ -41,6 +41,7 @@ class ApiTests(unittest.TestCase):
         payload = _serialize_clip(job, clip)
         self.assertEqual(payload["score_breakdown"]["relevance"], 91)
         self.assertTrue(payload["reframe_analysis_url"].endswith("/reframe-analysis"))
+        self.assertTrue(payload["gaming_analysis_url"].endswith("/gaming-analysis"))
 
     def test_rejects_non_youtube_url(self):
         client = TestClient(app)
@@ -77,6 +78,7 @@ class ApiTests(unittest.TestCase):
                     "creative_prompt": "Find practical founder advice",
                     "output_format": "landscape",
                     "caption_style": "clean",
+                    "content_mode": "gaming",
                     "target_clip_count": 3,
                     "min_clip_duration": 15,
                     "max_clip_duration": 30,
@@ -87,6 +89,7 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(queued_job.creative_prompt, "Find practical founder advice")
         self.assertEqual(queued_job.output_format.value, "landscape")
         self.assertEqual(queued_job.caption_style.value, "clean")
+        self.assertEqual(queued_job.content_mode.value, "gaming")
         self.assertEqual(queued_job.target_clip_count, 3)
         self.assertEqual(queued_job.min_clip_duration, 15)
         self.assertEqual(queued_job.max_clip_duration, 30)

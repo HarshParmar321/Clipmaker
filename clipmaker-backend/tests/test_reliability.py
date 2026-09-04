@@ -104,6 +104,25 @@ class ReliabilityTests(unittest.TestCase):
         self.assertEqual(response.status_code, 409)
         self.assertEqual(response.json()["detail"], "Video is too long")
 
+    def test_zero_highlight_failure_can_retry_from_saved_transcript(self):
+        job = self.create_job()
+        job.status = JobStatus.FAILED
+        job.failed_stage = JobStatus.DETECTING_HIGHLIGHTS.value
+        job.error = "No strong moments passed validation"
+        job.retryable = False
+        job.transcript = [{"word": "Complete.", "start": 0, "end": 8}]
+        self.repository.update_job(job)
+
+        status = TestClient(app).get(f"/api/jobs/{job.id}")
+        self.assertTrue(status.json()["can_retry"])
+
+        with patch("routers.jobs.run_pipeline") as run_pipeline:
+            response = TestClient(app).post(f"/api/jobs/{job.id}/retry")
+
+        self.assertEqual(response.status_code, 202)
+        self.assertEqual(self.repository.get_job(job.id).status, JobStatus.QUEUED)
+        run_pipeline.assert_called_once()
+
     def test_restart_recovery_marks_only_preexisting_active_jobs(self):
         cutoff = datetime.now(timezone.utc)
         interrupted = self.create_job()
