@@ -7,25 +7,26 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=Inter:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="style.css?v=9">
+<link rel="stylesheet" href="style.css?v=16">
 </head>
 <body>
 
+<a class="skip-link" href="#mainContent">Skip to Clipmaker</a>
 <div class="grain"></div>
 
 <header class="topbar">
   <div class="wrap topbar-inner">
-    <div class="brand">
+    <a class="brand" href="#mainContent" aria-label="Clipmaker home">
       <span class="brand-mark">◆</span>
       <span class="brand-name">CLIPMAKER</span>
-    </div>
+    </a>
     <div class="topbar-status" id="apiStatus">
       <span class="dot"></span> checking backend…
     </div>
   </div>
 </header>
 
-<main>
+<main id="mainContent">
 
   <!-- HERO -->
   <section class="hero wrap">
@@ -40,7 +41,7 @@
       <div class="slate-stripes" aria-hidden="true"></div>
       <div class="slate-body">
         <div class="slate-row">
-          <input type="text" id="urlInput" placeholder="Paste a YouTube link…" autocomplete="off" />
+          <input type="url" id="urlInput" aria-label="Video URL" placeholder="Paste a video link…" autocomplete="off" inputmode="url" />
           <span class="slate-or">or</span>
           <label class="btn-upload">
             <i class="upload-icon">⇧</i> Upload file
@@ -57,6 +58,13 @@
           </div>
         </div>
         <div class="generation-settings">
+          <fieldset class="setting-group" id="contentModeChoices">
+            <legend>Content type</legend>
+            <div class="choice-row compact">
+              <button type="button" class="choice-btn active" data-value="general" aria-pressed="true"><b>General</b><span>Talks · podcasts</span></button>
+              <button type="button" class="choice-btn" data-value="gaming" aria-pressed="false"><b>Gaming</b><span>OBS · facecam</span></button>
+            </div>
+          </fieldset>
           <fieldset class="setting-group" id="initialFormatChoices">
             <legend>Output format</legend>
             <div class="choice-row">
@@ -90,10 +98,10 @@
             </div>
           </fieldset>
         </div>
-        <button class="btn-primary" id="generateBtn">
+        <button type="button" class="btn-primary" id="generateBtn">
           <span>Generate clips</span>
         </button>
-        <p class="slate-hint" id="slateHint">Works best with videos under 15 minutes.</p>
+        <p class="slate-hint" id="slateHint" aria-live="polite">YouTube, Twitch, Vimeo, X, Reddit, Instagram, TikTok, Facebook, Loom, Dailymotion — or upload any file. Podcasts and streams up to 4 hours.</p>
       </div>
     </div>
   </section>
@@ -123,9 +131,9 @@
   <div class="sprocket-divider" aria-hidden="true"></div>
 
   <!-- RESULTS -->
-  <section class="wrap" id="resultsSection" hidden>
+  <section class="wrap" id="resultsSection" aria-labelledby="resultsTitle" hidden>
     <p class="eyebrow">02 — your clips</p>
-    <h2 class="section-title">Pick your favorites</h2>
+    <h2 class="section-title" id="resultsTitle">Pick your favorites</h2>
 
     <p class="section-title-sub">Every clip is ready to download—or open the studio to reframe, trim, and rewrite captions.</p>
 
@@ -133,13 +141,13 @@
   </section>
 
   <!-- TRIM EDITOR (opens when a clip is clicked) -->
-  <section class="wrap" id="editorSection" hidden>
+  <section class="wrap" id="editorSection" aria-label="Clip editor" hidden>
     <div class="editor-panel">
       <div class="editor-header">
         <p class="eyebrow" style="margin:0;">03 — edit this clip</p>
         <div class="editor-header-actions">
           <span class="editor-save-state" id="editorSaveState">No changes</span>
-          <button class="editor-close" id="editorClose">✕ close</button>
+          <button type="button" class="editor-close" id="editorClose">✕ close</button>
         </div>
       </div>
 
@@ -163,7 +171,39 @@
               <button type="button" data-value="original">Original</button>
             </div>
           </div>
-          <div class="control-block">
+          <div class="control-block" id="layoutControl" hidden>
+            <label>Layout</label>
+            <div class="mini-choice-row two" id="layoutChoices">
+              <button type="button" class="active" data-value="smart">Smart reframe</button>
+              <button type="button" data-value="gameplay_reaction">Gameplay + reaction</button>
+            </div>
+            <p class="control-help" id="layoutHelp">Gameplay keeps the upper 65% of the frame; the facecam is enlarged into the lower 35%.</p>
+          </div>
+          <div class="control-block" id="facecamControl" hidden>
+            <div class="control-label-row"><label>Facecam</label><span id="gamingCornerValue">auto</span></div>
+            <div class="facecam-corner-row" id="facecamCornerChoices">
+              <button type="button" class="active" data-value="auto">Find it</button>
+              <button type="button" data-value="top_left" aria-label="Top left" title="Top left"><i class="corner-ico c-tl"></i></button>
+              <button type="button" data-value="top_right" aria-label="Top right" title="Top right"><i class="corner-ico c-tr"></i></button>
+              <button type="button" data-value="bottom_left" aria-label="Bottom left" title="Bottom left"><i class="corner-ico c-bl"></i></button>
+              <button type="button" data-value="bottom_right" aria-label="Bottom right" title="Bottom right"><i class="corner-ico c-br"></i></button>
+            </div>
+            <canvas class="facecam-source" id="facecamSourceCanvas" aria-label="Facecam region on the source frame"></canvas>
+            <div class="control-label-row reframe-slider-label"><label for="facecamSize">Box size</label><span id="facecamSizeLabel">28%</span></div>
+            <input type="range" id="facecamSize" min="20" max="40" step="1" value="28" />
+            <div class="smart-reframe-info" id="gamingInfo" aria-live="polite">
+              <div class="smart-reframe-status"><span class="smart-status-dot" id="gamingDot"></span><strong id="gamingStatus">Detecting facecam…</strong></div>
+              <div class="smart-reframe-metrics two" id="gamingMetrics" hidden>
+                <span><b id="gamingConfidenceValue">—</b> confidence</span>
+                <span><b id="gamingDetectionValue">—</b> frames hit</span>
+              </div>
+              <p id="gamingMessage">Drag the box over your camera. Detection stays on this device.</p>
+            </div>
+            <div class="reframe-keyframe-actions one">
+              <button type="button" id="gamingResetBtn">Reset to detected box</button>
+            </div>
+          </div>
+          <div class="control-block" id="reframeControl">
             <label>Reframe</label>
             <div class="mini-choice-row two" id="reframeModeChoices">
               <button type="button" class="active" data-value="auto">Smart auto</button>
@@ -220,6 +260,14 @@
               <option value="top">Top</option>
             </select>
             <p class="control-help caption-layout-hint" id="captionLayoutHint">9:16 safe area · maximum 2 lines · preview matches export.</p>
+            <div class="mini-control">
+              <span>Language</span>
+              <div class="mini-choice-row two" id="captionLanguageChoices">
+                <button type="button" class="active" data-value="original">Original</button>
+                <button type="button" data-value="english">English</button>
+              </div>
+            </div>
+            <p class="control-help" id="captionLanguageHint">Captions follow the spoken language.</p>
           </div>
           <div class="control-block transcript-block">
             <div class="control-label-row"><label for="captionText">Caption text</label><span>editable</span></div>
@@ -327,6 +375,21 @@
         <button class="btn-primary editor-export" id="exportBtn">Render this edit</button>
       </div>
       <p class="slate-hint" id="editorStatus"></p>
+
+      <!-- the finished file, shown at size instead of hidden behind a link -->
+      <section class="render-result" id="renderResult" hidden aria-live="polite">
+        <div class="render-result-head">
+          <div>
+            <p class="render-result-kicker">Rendered clip</p>
+            <p class="render-result-meta" id="renderMeta"></p>
+          </div>
+          <div class="render-result-actions">
+            <a class="btn-secondary" id="renderOpen" target="_blank" rel="noopener">Open in new tab</a>
+            <a class="btn-primary" id="renderDownload" download>Download</a>
+          </div>
+        </div>
+        <video class="render-result-video" id="renderVideo" controls playsinline preload="metadata"></video>
+      </section>
     </div>
   </section>
 
@@ -347,6 +410,6 @@
   </div>
 </footer>
 
-<script src="script.js?v=23"></script>
+<script src="script.js?v=30"></script>
 </body>
 </html>
