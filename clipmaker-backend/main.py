@@ -8,7 +8,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from config import CLEANUP_INTERVAL_MINUTES, SUPABASE_CONFIGURED
 from routers import jobs
-from services.cleanup import cleanup_expired_artifacts
+from services.cleanup import run_maintenance
 from services.job_store import recover_interrupted_jobs
 from startup_checks import run_startup_checks
 
@@ -19,7 +19,7 @@ logger = logging.getLogger("clipmaker.main")
 async def _cleanup_loop() -> None:
     while True:
         await asyncio.sleep(CLEANUP_INTERVAL_MINUTES * 60)
-        await asyncio.to_thread(cleanup_expired_artifacts)
+        await asyncio.to_thread(run_maintenance)
 
 
 async def _startup_maintenance(started_at: datetime) -> None:
@@ -28,7 +28,7 @@ async def _startup_maintenance(started_at: datetime) -> None:
         recovered = await asyncio.to_thread(recover_interrupted_jobs, started_at)
         if recovered:
             logger.warning("Marked %d interrupted job(s) as retryable", recovered)
-        await asyncio.to_thread(cleanup_expired_artifacts)
+        await asyncio.to_thread(run_maintenance)
     except Exception:
         logger.exception("Startup maintenance failed; the API will remain available")
 
