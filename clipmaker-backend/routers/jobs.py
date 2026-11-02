@@ -10,6 +10,8 @@ from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, HTTPExcepti
 from fastapi.responses import FileResponse, Response, StreamingResponse
 from pydantic import BaseModel, Field, HttpUrl, field_validator, model_validator
 
+from services.caption_translator import translate_caption_words
+from services.platforms import find_platform, supported_names
 from config import (
     FAILED_JOB_TTL_HOURS,
     FINAL_CLIP_TTL_DAYS,
@@ -69,11 +71,21 @@ class CreateJobFromUrl(BaseModel):
 
     @field_validator("url")
     @classmethod
-    def youtube_only(cls, value: HttpUrl) -> HttpUrl:
-        hostname = (value.host or "").lower()
-        allowed = {"youtube.com", "www.youtube.com", "m.youtube.com", "music.youtube.com", "youtu.be"}
-        if hostname not in allowed:
-            raise ValueError("Only YouTube links are supported right now")
+    def supported_platform(cls, value: HttpUrl) -> HttpUrl:
+        """Clipmaker is not a YouTube tool — YouTube is just the common case.
+
+        A tested allowlist rather than "anything yt-dlp supports": it handles
+        well over a thousand sites, but many need a login or are region-locked,
+        and pasting one of those produces a confusing failure on a site nobody
+        ever tried. The list lives in services/platforms.py; adding one is a
+        single entry.
+        """
+        if find_platform(str(value)) is None:
+            raise ValueError(
+                "That link isn't from a platform we support yet. Supported: "
+                + ", ".join(supported_names())
+                + ". You can also upload the video file directly."
+            )
         return value
 
     @field_validator("creative_prompt")
@@ -128,6 +140,22 @@ class FacecamRegionPayload(BaseModel):
         if self.x + self.width > 1.001 or self.y + self.height > 1.001:
             raise ValueError("Facecam crop must stay inside the source video")
         return self
+
+
+class TranslateCaptionsRequest(BaseModel):
+    """Translate a clip's captions, keeping them on the speech timeline."""
+
+    language: str = Field(default="English", min_length=2, max_length=40)
+    start: float = Field(default=0, ge=0)
+    end: float | None = Field(default=None, gt=0)
+
+    @field_validator("language")
+    @classmethod
+    def clean_language(cls, value: str) -> str:
+        cleaned = " ".join(value.split())
+        if not cleaned.replace(" ", "").replace("-", "").isalpha():
+            raise ValueError("Language must be a language name, like English")
+        return cleaned
 
 
 class RenderClipRequest(BaseModel):
@@ -687,6 +715,60 @@ def get_gaming_analysis(
             if not analysis.used_fallback
             else "No stable facecam was detected, so the selected corner is being used."
         ),
+    }
+
+
+@router.post("/{job_id}/clips/{clip_id}/translate-captions")
+def translate_clip_captions(
+    job_id: str,
+    clip_id: str,
+    payload: TranslateCaptionsRequest,
+    user: AuthenticatedUser | None = Depends(current_user),
+):
+    """Return this clip's caption words in another language.
+
+    The studio swaps these into the editor rather than the export path, so the
+    live preview, manual edits and undo all keep working on translated captions
+    exactly as they do on the original ones.
+
+    Timings are relative to the clip start, matching what the editor already
+    holds and what the render endpoint expects back.
+    """
+    job = _get_accessible_job(job_id, user)
+    clip = next((item for item in job.clips if item.id == clip_id), None)
+    if not clip:
+        raise HTTPException(status_code=404, detail="Clip not found")
+
+    words = _clip_words(job, clip)
+    if not words:
+        raise HTTPException(status_code=409, detail="This clip has no transcribed speech to translate")
+
+    window_start = clip.start + payload.start
+    window_end = clip.end if payload.end is None else clip.start + payload.end
+    in_window = [
+        word
+        for word in words
+        if float(word["end"]) >= window_start and float(word["start"]) <= window_end
+    ]
+    if not in_window:
+        raise HTTPException(status_code=409, detail="No speech inside the trimmed range")
+
+    try:
+        translated = translate_caption_words(in_window, payload.language)
+    except VideoDownloadError as exc:
+        raise HTTPException(status_code=503, detail=exc.user_message) from exc
+
+    offset = clip.start
+    return {
+        "language": payload.language,
+        "caption_words": [
+            {
+                "word": word["word"],
+                "start": round(max(0.0, word["start"] - offset), 3),
+                "end": round(max(0.04, word["end"] - offset), 3),
+            }
+            for word in translated
+        ],
     }
 
 
