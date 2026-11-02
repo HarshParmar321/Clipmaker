@@ -43,6 +43,15 @@ GAMING_DEFAULT_BRIEF = (
 )
 
 
+_STAGE_LABELS = {
+    JobStatus.DOWNLOADING.value: "Downloading the video",
+    JobStatus.TRANSCRIBING.value: "Transcription",
+    JobStatus.DETECTING_HIGHLIGHTS.value: "Highlight detection",
+    JobStatus.CUTTING_CLIPS.value: "Cutting the clips",
+    JobStatus.BURNING_CAPTIONS.value: "Rendering the clips",
+}
+
+
 class PipelineCancelled(Exception):
     """Raised at a safe checkpoint after the user requests cancellation."""
 
@@ -229,9 +238,25 @@ def run_pipeline(job: Job) -> None:
                 ttl=timedelta(hours=FAILED_JOB_TTL_HOURS),
             )
             audio_artifact_id = audio_artifact.id
+            def report_transcription(window: int, total: int) -> None:
+                # A four-hour stream is 24 windows and several minutes of
+                # waiting. A bar that does not move reads as a hang.
+                if total <= 1:
+                    return
+                span = 40 - 24  # transcription owns 24%..40% of the job
+                _checkpoint(
+                    job,
+                    JobStatus.TRANSCRIBING,
+                    24 + round(span * window / total),
+                    f"Transcribing speech · part {window} of {total}",
+                    check_cancel=False,
+                )
+
             words = _retry_operation(
                 job,
-                lambda: transcriber.transcribe(video_path, audio_path),
+                lambda: transcriber.transcribe(
+                    video_path, audio_path, on_progress=report_transcription
+                ),
                 status=JobStatus.TRANSCRIBING,
                 progress_percent=32,
                 message="transcription",
@@ -247,6 +272,18 @@ def run_pipeline(job: Job) -> None:
             54,
             "Scoring hooks, relevance, completeness, and shareability…",
         )
+        def report_highlights(window: int, total: int) -> None:
+            if total <= 1:
+                return
+            span = 62 - 54  # highlight detection owns 54%..62%
+            _checkpoint(
+                job,
+                JobStatus.DETECTING_HIGHLIGHTS,
+                54 + round(span * window / total),
+                f"Finding the best moments · part {window} of {total}",
+                check_cancel=False,
+            )
+
         raw_clips = _retry_operation(
             job,
             lambda: highlight_detector.detect_highlights(
@@ -256,9 +293,11 @@ def run_pipeline(job: Job) -> None:
                     if job.content_mode == ContentMode.GAMING
                     else None
                 ),
+                content_mode=job.content_mode,
                 target_clip_count=job.target_clip_count,
                 min_clip_duration=job.min_clip_duration,
                 max_clip_duration=job.max_clip_duration,
+                on_progress=report_highlights,
             ),
             status=JobStatus.DETECTING_HIGHLIGHTS,
             progress_percent=58,
@@ -273,8 +312,10 @@ def run_pipeline(job: Job) -> None:
             max_clip_duration=job.max_clip_duration,
         )
         logger.info("[%s] accepted %d validated highlight(s)", job.id, len(clips))
-        if not clips:
-            clips = highlight_detector.recover_highlights(
+        if len(clips) < job.target_clip_count:
+            # Recovery used to run only when strict validation returned zero, so
+            # asking for five and getting one left four slots permanently empty.
+            recovered = highlight_detector.recover_highlights(
                 raw_clips,
                 duration,
                 words,
@@ -282,10 +323,26 @@ def run_pipeline(job: Job) -> None:
                 min_clip_duration=job.min_clip_duration,
                 max_clip_duration=job.max_clip_duration,
             )
+            added = 0
+            for candidate in recovered:
+                if len(clips) >= job.target_clip_count:
+                    break
+                overlaps = any(
+                    candidate["start"] < existing["end"]
+                    and candidate["end"] > existing["start"]
+                    for existing in clips
+                )
+                if not overlaps:
+                    clips.append(candidate)
+                    added += 1
+            clips.sort(key=lambda item: item["start"])
             logger.warning(
-                "[%s] strict validation returned no clips; recovered %d editable candidate(s)",
+                "[%s] strict validation returned %d of %d requested clip(s); "
+                "topped up with %d recovered candidate(s)",
                 job.id,
-                len(clips),
+                len(clips) - added,
+                job.target_clip_count,
+                added,
             )
         if not clips:
             raise VideoDownloadError(
@@ -442,11 +499,14 @@ def run_pipeline(job: Job) -> None:
         _mark_failed(job, exc.user_message, retryable=exc.retryable)
         if not exc.retryable:
             set_job_artifact_expiry(job.id, timedelta(hours=FAILED_JOB_TTL_HOURS))
-    except Exception:
+    except Exception as exc:
         logger.exception("[%s] Unexpected pipeline failure", job.id)
+        # A bare "something went wrong" leaves the user with nothing to act on.
+        # Surface the real reason, trimmed, so the UI can show what happened.
+        reason = " ".join(str(exc).split())[:220] or type(exc).__name__
         _mark_failed(
             job,
-            "Something unexpected went wrong while processing the video.",
+            f"{_STAGE_LABELS.get(job.current_stage, 'Processing')} failed: {reason}",
             retryable=True,
         )
     finally:
