@@ -9,7 +9,7 @@ import importlib.util
 import shutil
 import subprocess
 
-from config import AUTH_REQUIRED, SUPABASE_CONFIGURED
+from config import AUTH_REQUIRED, GROQ_API_KEY, SUPABASE_CONFIGURED
 
 logger = logging.getLogger("clipmaker.startup")
 
@@ -47,11 +47,80 @@ def check_libass_support() -> bool:
         return True  # don't block startup over a check that itself failed
 
 
+def check_js_runtime() -> bool:
+    """Warn when no JavaScript runtime is installed.
+
+    yt-dlp needs one to solve YouTube's signature challenge. Without it every
+    download silently degrades to the 640x360 muxed stream, and no amount of
+    encoder tuning downstream can recover from that — a 9:16 crop of 360p is
+    about 114 real pixels wide. This is quiet, permanent quality loss, so it
+    is worth a loud line at boot.
+    """
+    from services.downloader import JS_RUNTIMES
+
+    found = [name for name in JS_RUNTIMES if shutil.which(name)]
+    if found:
+        logger.info("JavaScript runtime for yt-dlp: %s", ", ".join(found))
+        return True
+    logger.warning(
+        "No JavaScript runtime found (looked for: %s). YouTube will only serve "
+        "the 360p stream, and vertical clips will be badly upscaled. "
+        "Fix it with: brew install deno (Mac) / apt install nodejs (Linux).",
+        ", ".join(JS_RUNTIMES) or "none configured",
+    )
+    return False
+
+
+def check_highlight_models() -> bool:
+    """Verify the configured highlight models still exist on this Groq account.
+
+    Providers retire models without warning, and the failure otherwise appears
+    minutes into a real job as a 404 buried in a traceback. Catch it at boot,
+    name the models that are gone, and list what the account can actually use.
+    """
+    if not GROQ_API_KEY:
+        logger.error("GROQ_API_KEY is not set - transcription and highlights will fail.")
+        return False
+    try:
+        from groq import Groq
+
+        from services.highlight_detector import _model_chain
+
+        available = {model.id for model in Groq(api_key=GROQ_API_KEY).models.list().data}
+        configured = _model_chain()
+        missing = [name for name in configured if name not in available]
+        if not missing:
+            logger.info("Highlight models available: %s", ", ".join(configured))
+            return True
+
+        if len(missing) == len(configured):
+            logger.error(
+                "None of the configured highlight models exist on this Groq account: %s. "
+                "Update GROQ_HIGHLIGHT_MODEL in .env. Chat models available to you: %s",
+                ", ".join(missing),
+                ", ".join(sorted(available)) or "none",
+            )
+            return False
+        logger.warning(
+            "These highlight models are gone from this Groq account and will be "
+            "skipped: %s. Still usable: %s",
+            ", ".join(missing),
+            ", ".join(name for name in configured if name in available),
+        )
+        return True
+    except Exception as exc:
+        # Never block boot on a check that itself failed (offline, rate limited).
+        logger.warning("Could not verify Groq highlight models: %s", exc)
+        return True
+
+
 def run_startup_checks() -> None:
     logger.info("Running startup checks...")
     ffmpeg_ok = check_ffmpeg_installed()
     if ffmpeg_ok:
         check_libass_support()
+    check_js_runtime()
+    check_highlight_models()
     if not SUPABASE_CONFIGURED:
         logger.warning(
             "Supabase metadata persistence is not configured. The API will use "
