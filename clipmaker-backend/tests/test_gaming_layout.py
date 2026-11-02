@@ -6,7 +6,13 @@ from routers.jobs import RenderClipRequest
 from pydantic import ValidationError
 from services.caption_burner import build_ass_file
 from services.gaming_layout import FacecamRegion, _Detection, choose_facecam_region
-from services.render_settings import CaptionPosition, FacecamCorner, LayoutMode
+from services.render_settings import (
+    CaptionPosition,
+    FacecamCorner,
+    LayoutMode,
+    OutputFormat,
+    TARGET_DIMENSIONS,
+)
 from services.video_cutter import build_gaming_filter
 
 
@@ -35,8 +41,11 @@ class GamingLayoutTests(unittest.TestCase):
     def test_filter_builds_65_35_vertical_composition(self):
         graph = build_gaming_filter(FacecamRegion(.67, .64, .31, .34))
         self.assertIn("split=2", graph)
-        self.assertIn("scale=720:832", graph)
-        self.assertIn("scale=720:448", graph)
+        # The 65/35 split is the contract here, not any particular resolution.
+        width, height = TARGET_DIMENSIONS[OutputFormat.VERTICAL]
+        gameplay_height = round(height * 0.65 / 2) * 2
+        self.assertIn(f"scale={width}:{gameplay_height}", graph)
+        self.assertIn(f"scale={width}:{height - gameplay_height}", graph)
         self.assertIn("vstack=inputs=2", graph)
         self.assertTrue(graph.endswith("[vout]"))
 

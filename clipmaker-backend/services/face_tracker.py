@@ -16,6 +16,21 @@ from statistics import median
 
 logger = logging.getLogger("clipmaker.face_tracker")
 
+
+def source_zoom_ceiling(source_height: int) -> float:
+    """How far we may push in before the crop is mostly invented pixels.
+
+    A 9:16 column out of a landscape frame is already an upscale; zoom
+    multiplies it. Capping here rather than at render time means the studio
+    shows the zoom that will actually be used.
+    """
+    from config import MAX_UPSCALE_FACTOR
+    from services.render_settings import OutputFormat, TARGET_DIMENSIONS
+
+    target_height = TARGET_DIMENSIONS[OutputFormat.VERTICAL][1]
+    ceiling = MAX_UPSCALE_FACTOR * max(int(source_height), 1) / target_height
+    return max(1.0, round(min(3.0, ceiling), 2))
+
 YUNET_MODEL_PATH = (
     Path(__file__).resolve().parent.parent
     / "models"
@@ -734,6 +749,16 @@ def _track_subject_cached(
         detection_ratio=detection_ratio,
         average_face_count=average_face_count,
     )
+    ceiling = source_zoom_ceiling(source_height)
+    if zoom > ceiling:
+        logger.info(
+            "Smart reframe zoom limited to %.2fx (wanted %.2fx): a %dp source "
+            "cannot fill a vertical frame at more than that without upscaling",
+            ceiling,
+            zoom,
+            source_height,
+        )
+        zoom = ceiling
     raw_points: list[FocusPoint] = []
     for sample in samples:
         if sample.box is None:

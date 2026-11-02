@@ -1,5 +1,6 @@
 import unittest
 
+from services.render_settings import OutputFormat, TARGET_DIMENSIONS
 from services.face_tracker import (
     FaceBox,
     FocusPoint,
@@ -148,7 +149,12 @@ class FaceTrackerTests(unittest.TestCase):
                 CropKeyframe(4, 0.8, 0.7),
             ],
         )
-        self.assertIn("scale=1080:1920", video_filter)
+        # Derived, not hardcoded: OUTPUT_HEIGHT is a config knob, and a test
+        # that pins 720p breaks the moment quality is raised.
+        width, height = TARGET_DIMENSIONS[OutputFormat.VERTICAL]
+        zoomed = f"scale={round(width * 1.5 / 2) * 2}:{round(height * 1.5 / 2) * 2}"
+        self.assertIn(zoomed, video_filter)
+        self.assertIn(f"crop={width}:{height}", video_filter)
         self.assertIn("(iw-ow)", video_filter)
         self.assertIn("(ih-oh)", video_filter)
         self.assertIn("if(lt(t\\,4.000)", video_filter)

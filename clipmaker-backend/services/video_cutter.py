@@ -7,11 +7,13 @@ import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 
+from config import AUDIO_BITRATE, VIDEO_CRF, VIDEO_PRESET
 from services.exceptions import VideoDownloadError
 from services.face_tracker import (
     FocusPoint,
     ReframeAnalysis,
     slice_focus_points,
+    source_zoom_ceiling,
     track_subject,
 )
 from services.gaming_layout import FacecamRegion, detect_facecam_region
@@ -117,7 +119,8 @@ def _video_filter(
             )
         filters.append(
             "setpts=PTS-STARTPTS,"
-            f"scale={scaled_width}:{scaled_height}:force_original_aspect_ratio=increase,"
+            f"scale={scaled_width}:{scaled_height}"
+            ":force_original_aspect_ratio=increase:flags=lanczos,"
             f"crop={width}:{height}:x='{x_expression}':y='{y_expression}',setsar=1"
         )
     if ass_path:
@@ -163,14 +166,16 @@ def build_gaming_filter(
     )
     graph = (
         "[0:v]setpts=PTS-STARTPTS,split=2[game_src][reaction_src];"
-        f"[game_src]scale={width}:{gameplay_height}:force_original_aspect_ratio=increase,"
+        f"[game_src]scale={width}:{gameplay_height}"
+        ":force_original_aspect_ratio=increase:flags=lanczos,"
         f"crop={width}:{gameplay_height}:x='{x_expression}':y='{y_expression}',"
         "setsar=1[game];"
         "[reaction_src]"
         f"crop=w='floor(iw*{region.width:.6f}/2)*2':"
         f"h='floor(ih*{region.height:.6f}/2)*2':"
         f"x='iw*{region.x:.6f}':y='ih*{region.y:.6f}',"
-        f"scale={width}:{reaction_height}:force_original_aspect_ratio=increase,"
+        f"scale={width}:{reaction_height}"
+        ":force_original_aspect_ratio=increase:flags=lanczos,"
         f"crop={width}:{reaction_height},setsar=1[reaction];"
         f"[game][reaction]vstack=inputs=2,"
         f"drawbox=x=0:y={gameplay_height - 4}:w={width}:h=8:color=black@0.88:t=fill"
@@ -294,6 +299,9 @@ def _render(
             else analysis.points
         )
         smart_zoom = analysis.zoom
+    if not gaming_layout and OutputFormat(output_format) == OutputFormat.VERTICAL:
+        # Backstop for manually-set zoom, which never went through the tracker.
+        smart_zoom = min(float(smart_zoom), source_zoom_ceiling(probe_media(source_path)["height"]))
     if gaming_layout:
         region = facecam_region or detect_facecam_region(
             source_path, start, end, facecam_corner
@@ -325,15 +333,21 @@ def _render(
             "-c:v",
             "libx264",
             "-crf",
-            "20",
+            str(VIDEO_CRF),
             "-preset",
-            "veryfast",
+            VIDEO_PRESET,
+            "-profile:v",
+            "high",
+            "-level",
+            "4.2",
             "-pix_fmt",
             "yuv420p",
             "-c:a",
             "aac",
             "-b:a",
-            "160k",
+            AUDIO_BITRATE,
+            "-ar",
+            "48000",
             "-movflags",
             "+faststart",
             str(out_path),

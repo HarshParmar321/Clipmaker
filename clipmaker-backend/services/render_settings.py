@@ -2,6 +2,8 @@
 
 from enum import Enum
 
+from config import OUTPUT_HEIGHT
+
 
 class OutputFormat(str, Enum):
     ORIGINAL = "original"
@@ -51,7 +53,16 @@ class FacecamCorner(str, Enum):
     BOTTOM_RIGHT = "bottom_right"
 
 
+def _even(value: float) -> int:
+    """H.264 requires even dimensions."""
+    return max(2, round(value / 2) * 2)
+
+
+# Derived from OUTPUT_HEIGHT so one setting moves both orientations:
+# 1080 -> 1920x1080 landscape and 1080x1920 vertical.
+_LANDSCAPE_HEIGHT = _even(OUTPUT_HEIGHT)
+_VERTICAL_WIDTH = _even(OUTPUT_HEIGHT)
 TARGET_DIMENSIONS: dict[OutputFormat, tuple[int, int]] = {
-    OutputFormat.LANDSCAPE: (1280, 720),
-    OutputFormat.VERTICAL: (720, 1280),
+    OutputFormat.LANDSCAPE: (_even(_LANDSCAPE_HEIGHT * 16 / 9), _LANDSCAPE_HEIGHT),
+    OutputFormat.VERTICAL: (_VERTICAL_WIDTH, _even(_VERTICAL_WIDTH * 16 / 9)),
 }
