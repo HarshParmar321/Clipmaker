@@ -8,6 +8,34 @@ from pathlib import Path
 from services.render_settings import CaptionPosition, CaptionSize, CaptionStyle
 
 
+# Scripts that need a different face, and the bundled font that covers them.
+# libass only reliably finds fonts in fonts/ (passed as fontsdir), so naming a
+# font that is not in that folder means the host decides — which is how Hindi
+# captions render fine on a Mac and as empty boxes on a Linux server.
+#
+# Adding a language is one entry here plus the font file. Ranges are checked in
+# order, so put a script's own block before any shared range.
+SCRIPT_FONTS: tuple[tuple[range, str], ...] = (
+    (range(0x0900, 0x0980), "Poppins"),  # Devanagari — Hindi, Marathi, Nepali
+)
+
+# Poppins was drawn as a Devanagari-and-Latin family, which is the point: Indian
+# creators code-mix constantly, and "बहुत good है" is one caption line. A
+# Devanagari-only font would just move the empty boxes onto the English words.
+
+
+def font_for_text(text: str, default_font: str) -> str:
+    """Pick a face that can actually draw this caption.
+
+    Returns the preset's own font unless the text contains a script that font
+    cannot render, in which case the bundled face for that script wins.
+    """
+    for code_points, font in SCRIPT_FONTS:
+        if any(ord(character) in code_points for character in text):
+            return font
+    return default_font
+
+
 STYLE_PRESETS = {
     CaptionStyle.BOLD: {
         "font": "Bebas Neue",
@@ -22,7 +50,7 @@ STYLE_PRESETS = {
         "scale": 1.0,
     },
     CaptionStyle.CLEAN: {
-        "font": "Arial",
+        "font": "Poppins",
         "primary": "&H00FFFFFF",
         "secondary": "&H00FFFFFF",
         "outline": "&H00000000",
@@ -34,7 +62,7 @@ STYLE_PRESETS = {
         "scale": 0.78,
     },
     CaptionStyle.KARAOKE: {
-        "font": "Arial",
+        "font": "Poppins",
         "primary": "&H0028B9FF",
         "secondary": "&H00FFFFFF",
         "outline": "&H00000000",
@@ -183,12 +211,19 @@ def build_ass_file(
     position = CaptionPosition(position)
     size = CaptionSize(size)
     preset = STYLE_PRESETS[style]
+    caption_font = font_for_text(
+        " ".join(str(word.get("word") or "") for word in words), preset["font"]
+    )
     is_vertical = frame_height > frame_width
     # Width is the limiting dimension in portrait video. Basing type on height
     # made 9:16 captions huge and caused long words to leave the safe area.
     base_size = frame_width * (0.075 if is_vertical else 0.038)
+    # The bounds scale with the frame. A fixed 28-72px cap was tuned for a
+    # 720px-wide canvas; at 1080 it silently shrank captions by a third.
+    smallest = frame_width * 0.038
+    largest = frame_width * 0.100
     font_size = round(
-        max(28, min(base_size * preset["scale"] * SIZE_SCALE[size], 72))
+        max(smallest, min(base_size * preset["scale"] * SIZE_SCALE[size], largest))
     )
     max_words = 5 if is_vertical else 8
     max_characters = 30 if is_vertical else 52
@@ -225,7 +260,7 @@ ScaledBorderAndShadow: yes
 
 [V4+ Styles]
 Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
-Style: Caption,{preset['font']},{font_size},{preset['primary']},{preset['secondary']},{preset['outline']},{preset['back']},1,0,0,0,100,100,{preset['spacing']},0,{preset['border']},{preset['outline_width']},{preset['shadow']},{alignment},{margin_h},{margin_h},{margin_v},1
+Style: Caption,{caption_font},{font_size},{preset['primary']},{preset['secondary']},{preset['outline']},{preset['back']},1,0,0,0,100,100,{preset['spacing']},0,{preset['border']},{preset['outline_width']},{preset['shadow']},{alignment},{margin_h},{margin_h},{margin_v},1
 
 [Events]
 Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text

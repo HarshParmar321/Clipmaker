@@ -33,7 +33,7 @@ class CaptionTests(unittest.TestCase):
             content = path.read_text()
         self.assertIn("PlayResX: 1280", content)
         self.assertIn("PlayResY: 720", content)
-        self.assertIn("Arial", content)
+        self.assertIn("Poppins", content)  # bundled; "Arial" does not exist on Linux
         self.assertIn(",8,", content)
 
     def test_vertical_caption_uses_mobile_safe_area_and_two_line_wrap(self):
